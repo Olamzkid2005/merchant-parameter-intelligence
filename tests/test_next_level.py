@@ -57,13 +57,13 @@ sample_profile = {
              "overall_score": 100.0},
     "identity": {
         "email": {"label": "Emails", "total": 1,
-                  "values": [{"value": "temitope@purple.xyz", "count": 6}]},
+                  "values": [{"value": "merchant@example.com", "count": 6}]},
         "phone": {"label": "Phones", "total": 0, "values": []},
     },
     "name_variants": [{"name": "SWEB_MARYLAND MALL", "count": 5},
                       {"name": "MARYLAND MALL", "count": 1}],
     "sources": [{"sheet": "2ISW Deployment Status", "count": 6}],
-    "members": [{"id": 1, "email": "temitope@purple.xyz",
+    "members": [{"id": 1, "email": "merchant@example.com",
                  "merchant_name": "SWEB_MARYLAND MALL"}],
     "alias_candidates": ["SWEB_MARYLAND MALL"],
 }
@@ -71,7 +71,7 @@ tb = build_template_brief(sample_profile)
 check("template brief mentions the seed name",
       "SWEB_MARYLAND MALL" in tb, tb[:120])
 check("template brief mentions the confirmed email",
-      "temitope@purple.xyz" in tb)
+      "merchant@example.com" in tb)
 check("template brief mentions name variants", "variants" in tb.lower())
 check("template brief mentions sources", "source" in tb.lower())
 check("template brief mentions alias candidates",
@@ -192,23 +192,36 @@ try:
           str(sorted(_med_names)))
 
     # Identifier-fragment families must NOT be emptied by the cross-merchant
-    # guard: phone 08098726020 is carried by LAGOON WATERS LTD rows AND by
-    # "Interswitch Limited/NNPC 15/16" rows — which are the SAME terminal
-    # rows named differently by two files (identical tid+mxcode+MID+account
-    # tuples). The full-signature test must let them link, so the phone
-    # family is populated again.
-    _ph = _p.build("08098726020")
-    _ph_names = {str(m.get("merchant_name") or "").upper()
-                 for m in _ph.get("members", [])}
-    check("phone fragment family is populated (not 0)",
-          len(_ph.get("members", [])) >= 10,
-          f"{len(_ph.get('members', []))} rows")
-    check("phone family includes LAGOON WATERS",
-          any("LAGOON WATERS" in n for n in _ph_names),
-          str(sorted(_ph_names)))
-    check("phone family includes the same merchant's other name",
-          any("INTERSWITCH" in n and "NNPC" in n for n in _ph_names),
-          str(sorted(_ph_names)))
+    # guard: a phone carried by LAGOON WATERS LTD rows AND by an
+    # "Interswitch Limited/NNPC" row (the SAME terminal rows named
+    # differently by two files — identical tid+mxcode+MID+account tuples).
+    # The full-signature test must let them link, so the phone family is
+    # populated again. The phone is pulled from the LOCAL database at
+    # runtime — the repo never hardcodes merchant contact data.
+    import sqlite3 as _sqlite3
+    from merchant_intelligence import config as _cfg
+    _conn = _sqlite3.connect(str(_cfg.active_db()))
+    _row = _conn.execute(
+        "SELECT phone FROM merchants WHERE merchant_name LIKE "
+        "'%LAGOON WATERS%' AND phone LIKE '080%' AND length(phone)=11 "
+        "LIMIT 1").fetchone()
+    _conn.close()
+    _ph_phone = (_row[0] if _row else "")
+    if not _ph_phone:
+        print("  ! no LAGOON WATERS 080-phone in local DB — skipping family check")
+    else:
+        _ph = _p.build(_ph_phone)
+        _ph_names = {str(m.get("merchant_name") or "").upper()
+                     for m in _ph.get("members", [])}
+        check("phone fragment family is populated (not 0)",
+              len(_ph.get("members", [])) >= 10,
+              f"{len(_ph.get('members', []))} rows")
+        check("phone family includes LAGOON WATERS",
+              any("LAGOON WATERS" in n for n in _ph_names),
+              str(sorted(_ph_names)))
+        check("phone family includes the same merchant's other name",
+              any("INTERSWITCH" in n and "NNPC" in n for n in _ph_names),
+              str(sorted(_ph_names)))
 
     # The JUST CHIPS fan-out the guard was BUILT to stop must stay blocked:
     # JUST CHIPS and OLAWALE ODUOLA share MX154553/email/phone but have

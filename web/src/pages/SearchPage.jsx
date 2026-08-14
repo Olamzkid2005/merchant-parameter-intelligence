@@ -60,7 +60,7 @@ const IDENTIFIER_LABELS = {
   account_number: 'Account No.',
 }
 
-const SEARCH_EXAMPLES = ['LAGOON WATERS', '08098726020', 'MX183544', 'smonsuru@filmhouseng.com', 'get me all the information on medplus']
+const SEARCH_EXAMPLES = ['LAGOON WATERS', '08000000000', 'MX183544', 'merchant30@example.com', 'get me all the information on medplus']
 
 /* ── Natural-request detection (frontend gate) ─────────────────────────── */
 
@@ -1394,7 +1394,7 @@ export default function SearchPage({ onOpenProfile }) {
               }, 150)
             }}
             onKeyDown={handleAcKeyDown}
-            placeholder="Search by name, phone, email, TID or MX code — e.g. 08098726020"
+            placeholder="Search by name, phone, email, TID or MX code — e.g. 08000000000"
             className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest py-4 pl-12 pr-24 text-base shadow-sm outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary/20"
           />
           <div className="absolute inset-y-0 right-4 flex items-center gap-2">

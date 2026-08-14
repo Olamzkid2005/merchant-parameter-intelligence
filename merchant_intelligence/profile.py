@@ -20,7 +20,7 @@ The result is a single structure:
 Usage:
     from merchant_intelligence.profile import MerchantProfile
     p = MerchantProfile()
-    data = p.build("smonsuru@filmhouseng.com")
+    data = p.build("merchant30@example.com")
 """
 
 import logging

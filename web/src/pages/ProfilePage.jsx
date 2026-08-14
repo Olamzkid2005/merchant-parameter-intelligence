@@ -25,7 +25,7 @@ function memberCell(r, h) {
   return map[h]
 }
 
-const PROFILE_EXAMPLES = ['smonsuru@filmhouseng.com', 'LAGOON WATERS', 'MX183544', '08098726020']
+const PROFILE_EXAMPLES = ['merchant30@example.com', 'LAGOON WATERS', 'MX183544', '08000000000']
 const COMPARE_EXAMPLES = [
   ['LAGOON WATERS', 'MX183544'],
   ['THE FILM HOUSE', 'MONEYTRUST'],

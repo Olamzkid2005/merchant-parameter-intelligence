@@ -270,7 +270,7 @@ def _instruction_line_name(line: str) -> str:
 
 
 # Identifier labels glued to their value with a hyphen/colon ('MXCODE-MX77826',
-# 'TID:2103O338', 'PHONE-08098726020', 'EMAIL-a@b.com'). The tokenizer splits on
+# 'TID:2103O338', 'PHONE-08000000000', 'EMAIL-a@b.com'). The tokenizer splits on
 # whitespace only, so without this the whole glued token fails the DB classifier
 # and the identifier silently vanishes into the name text. Only the label prefix
 # is split off — the right side still has to classify as a real registry value

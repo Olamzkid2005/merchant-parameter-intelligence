@@ -391,7 +391,7 @@ export default function QuickMatchPage() {
             onChange={setText}
             rows={6}
             mono
-            placeholder={'08098726020\nMX183544\n2103O166\nsmonsuru@filmhouseng.com'}
+            placeholder={'08000000000\nMX183544\n2103O166\nmerchant30@example.com'}
           />
           <div className="flex items-center justify-between border-t border-outline-variant px-5 py-3">
             <span className="font-plex text-xs text-on-surface-variant">

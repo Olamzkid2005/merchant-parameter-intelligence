@@ -5,7 +5,7 @@ Turns the merchant 360° profile JSON into a natural-language investigation
 dossier, the way a fraud/onboarding analyst would write it:
 
     \"MARYLAND MALL LIMITED REVENUE COLLECTION ACCOUNT appears under 2 name
-     variants across 1 source. It has 1 confirmed email (temitope@purple.xyz)
+     variants across 1 source. It has 1 confirmed email (merchant21@example.com)
      shared by 6 records...\"
 
 Two modes:

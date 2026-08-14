@@ -23,14 +23,36 @@ def show(label, q, limit=3):
 
 s = MerchantSearch()
 
+# Real identifiers are pulled from the LOCAL database at runtime so the
+# repository never hardcodes merchant contact data (the DB is gitignored).
+# The identifier-search behaviour is what matters: exact-match resolution,
+# phone normalization, MX/TID lookup.
+import sqlite3 as _sqlite3
+from merchant_intelligence import config as _config
+_db = _sqlite3.connect(str(_config.active_db()))
+_phone = (_db.execute(
+    "SELECT phone FROM merchants WHERE phone LIKE '080%' AND length(phone)=11 "
+    "LIMIT 1").fetchone() or [None])[0]
+_email = (_db.execute(
+    "SELECT email FROM merchants WHERE email LIKE '%@%' AND email NOT LIKE "
+    "'%@example.com' AND email NOT LIKE '%@test.com' LIMIT 1").fetchone()
+    or [None])[0]
+_db.close()
+
 # Identifier searches — must stay 98.0 Exact Match
-show("phone 0-prefix", "08098726020")
-show("phone +234", "2348098726020")
-show("phone +234 with +", "+2348098726020")
-show("phone no-leading-zero", "8098726020")
+if _phone:
+    show("phone 0-prefix", _phone)
+    show("phone +234", _phone[1:])  # drop the leading 0
+    show("phone +234 with +", "+" + _phone[1:])
+    show("phone no-leading-zero", _phone[1:])
+else:
+    print("=== no 080-prefixed phone in local DB — skipping phone demos ===")
 show("MX code", "MX183544")
 show("TID", "2103O166")
-show("email", "smonsuru@filmhouseng.com")
+if _email:
+    show("email", _email)
+else:
+    print("=== no email in local DB — skipping email demo ===")
 
 # Name-search regressions (must stay fast and correct)
 show("name regression", "THE FILM HOUSE")

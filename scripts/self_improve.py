@@ -89,7 +89,7 @@ def suggest_aliases(rows: list, max_per_merchant: int = MAX_SUGGESTIONS_PER_MERC
     A failure means the RAW engine did not surface the confirmed record at
     rank 1. Its family (records sharing identifiers with the query) is the
     strongest source of alias candidates — e.g. LAGOON WATERS LTD's family
-    contains the record carrying dejiladgroup@yahoo.com under a different
+    contains the record carrying merchant20@example.com under a different
     name. Teaching those names makes the next run find it.
 
     Returns the list of learned (alias, canonical) pairs.

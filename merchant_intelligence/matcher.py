@@ -478,8 +478,8 @@ class MerchantMatcher:
         # match that found FOLASHADE KALEJAIYE before the alias probe ran —
         # the alias version REPLACES the weak entry instead of being skipped.
         # The old append-only merge silently dropped these rows, leaving the
-        # correct records (HARRISON's harrisbliss@yahoo.com row, FOLASHADE's
-        # phola.isaac@gmail.com rows) buried at Low-Confidence scores outside
+        # correct records (HARRISON's merchant17@example.com row, FOLASHADE's
+        # merchant14@example.com rows) buried at Low-Confidence scores outside
         # the result window.
         alias_by_id = {r.merchant_id: r for r in alias_results}
         for idx, r in enumerate(all_results):
@@ -586,7 +586,7 @@ class MerchantMatcher:
             # high-cardinality merchants can have 60-210 rows with the same
             # name — e.g. ATREOS (63 rows) and ARTEE (210 rows). A tight
             # window truncates the rows carrying the REAL email (e.g. ATREOS
-            # rows 41749+ with NBASHIR@ATREOS.COM ranked 26-27, missing the
+            # rows 41749+ with merchant5@example.com ranked 26-27, missing the
             # alias boost entirely), leaving only bare email='Y' siblings
             # boosted.
             rows: List[Dict[str, Any]] = []
@@ -654,7 +654,7 @@ class MerchantMatcher:
         # Deterministic ordering for the UI: among equal alias-confirmed
         # scores, prefer rows that carry a real email address — they are the
         # richer records (e.g. HARRISON EZEASOMBA appears on both a bare
-        # row and one carrying harrisbliss@yahoo.com; the email row should
+        # row and one carrying merchant17@example.com; the email row should
         # lead so the user sees the actionable record first).
         results.sort(
             key=lambda r: (
@@ -988,7 +988,7 @@ class MerchantMatcher:
     # query is normalised (digits-only for phones, compact for codes,
     # lower-case for emails) and matched directly against each identifier
     # column — this bypasses tokenisation, which would otherwise destroy
-    # values like "08098726020" or "dejiladgroup@yahoo.com".
+    # values like "08000000000" or "merchant20@example.com".
     #
     # Retrieval leans on the trigram FTS index (which covers every identifier
     # column and is substring-tolerant) instead of per-column LIKE scans —
@@ -1028,7 +1028,7 @@ class MerchantMatcher:
         """True if two phone digit-strings are the same number.
 
         Tolerates the Nigerian +234 / 0 prefix forms and leading zeros:
-        "08098726020" ≡ "2348098726020" ≡ "+2348098726020".
+        "08000000000" ≡ "234800000000" ≡ "+234800000000".
         """
         a = (a or "").lstrip("0")
         b = (b or "").lstrip("0")
@@ -1039,7 +1039,7 @@ class MerchantMatcher:
         if b.startswith("234") and b[3:] == a:
             return True
         # Last-10-digits match only when the length difference is exactly a
-        # country-code (3) or zero — prevents 08098726020 vs 18098726020
+        # country-code (3) or zero — prevents 08000000000 vs 18098726020
         # (different first digit) from being treated as equivalent.
         return (len(a) >= 10 and len(b) >= 10
                 and abs(len(a) - len(b)) in (0, 3)
@@ -1049,8 +1049,8 @@ class MerchantMatcher:
     def _phone_retrieval_forms(cls, q_digits: str) -> Set[str]:
         """Canonical searchable forms for a phone query.
 
-        The trigram FTS tokenizer breaks "2348098726020" into trigrams that
-        do NOT appear in stored "08098726020", so a +234-formatted query can
+        The trigram FTS tokenizer breaks "234800000000" into trigrams that
+        do NOT appear in stored "08000000000", so a +234-formatted query can
         never retrieve the row even though _phone_equivalent would accept it.
         Return the digit form plus the 0-prefixed / 234-prefixed variants so
         retrieval probes can find the stored form.

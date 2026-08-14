@@ -44,10 +44,10 @@ check("no MX in that text", ids["mxcode"] == [], repr(ids["mxcode"]))
 check("email empty", ids["email"] == [])
 check("phone empty", ids["phone"] == [])
 
-mixed = parse_identifiers("MX184380 and 08098726020 and 2103O338 "
+mixed = parse_identifiers("MX184380 and 08000000000 and 2103O338 "
                           "and a@b.com and MX184380 again")
 check("mixed MX codes deduped", mixed["mxcode"] == ["MX184380"], repr(mixed["mxcode"]))
-check("mixed phone", mixed["phone"] == ["08098726020"], repr(mixed["phone"]))
+check("mixed phone", mixed["phone"] == ["08000000000"], repr(mixed["phone"]))
 check("mixed tid", mixed["tid"] == ["2103O338"], repr(mixed["tid"]))
 check("mixed email", mixed["email"] == ["a@b.com"], repr(mixed["email"]))
 
@@ -2296,10 +2296,10 @@ _ids_glued = parse_identifiers(
     "alias tied to this MXCODE-MX77826")
 check("glued MXCODE- identifier splits to MX77826",
       _ids_glued.get("mxcode") == ["MX77826"], repr(_ids_glued.get("mxcode")))
-_ids_labeled = parse_identifiers("TID:2103O338 PHONE-08098726020 EMAIL-a@b.com")
+_ids_labeled = parse_identifiers("TID:2103O338 PHONE-08000000000 EMAIL-a@b.com")
 check("labeled TID: extracts", "2103O338" in _ids_labeled.get("tid", []),
       repr(_ids_labeled))
-check("labeled PHONE- extracts", "08098726020" in _ids_labeled.get("phone", []),
+check("labeled PHONE- extracts", "08000000000" in _ids_labeled.get("phone", []),
       repr(_ids_labeled))
 check("labeled EMAIL- extracts", "a@b.com" in _ids_labeled.get("email", []),
       repr(_ids_labeled))

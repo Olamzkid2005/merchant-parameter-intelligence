@@ -161,7 +161,7 @@ _DEFAULT_MANUAL_ALIASES = {
     ],
     "ARTEE INDUSTRIES LIMITED": [
         # The workbook contains 340 rows named exactly "ARTEE INDUSTRIES
-        # LIMITED" (some carry account.treasury@arteegroup.com). Artee Group
+        # LIMITED" (some carry merchant3@example.com). Artee Group
         # operates the SPAR franchise in Nigeria, so SPAR store searches
         # resolve here. The value is the real DB record name.
         "ARTEE INDUSTRIES LIMITED",
@@ -222,7 +222,7 @@ _DEFAULT_MANUAL_ALIASES = {
     # CRANE FIELD INTERNMATIONAL SCHOOL JEDDO resolves to the EAGLE FLIGHT
     # MICROFINANCE BANK record whose slip_header reads "CRANEFIELD INT'L
     # SCHOOL" (row 37857) — confirmed via the reference sheet note
-    # "used slipheader to find it" with email me@yahoo.com (row 41619,
+    # "used slipheader to find it" with email merchant9@example.com (row 41619,
     # same merchant name). EAGLE FLIGHT MFB is the processing entity; the
     # school is identified by its slip header on those rows.
     "CRANE FIELD INTERNMATIONAL SCHOOL JEDDO": [
@@ -392,7 +392,7 @@ CODE_NAME_BOOST = 8.0           # 8x boost for slip_header + account_name
 # How many DB rows to retrieve per alias target. Generous (120) because
 # high-cardinality merchants can have 60-210 rows with the same name (ATREOS
 # 63, ARTEE 210) — a tight window truncates the rows carrying the REAL email
-# (e.g. ATREOS rows 41749+ with NBASHIR@ATREOS.COM), leaving only bare
+# (e.g. ATREOS rows 41749+ with merchant5@example.com), leaving only bare
 # email='Y' siblings boosted.
 ALIAS_PROBE_LIMIT = 120
 
@@ -405,7 +405,7 @@ ALIAS_PROBE_LIMIT = 120
 # KOLA AMUSAN rows diluted them to 92.5 while bare WHITEVILL rows hit 100.0.
 # 70 keeps only genuinely strong secondary matches (token overlap / substring).
 # 50 was too permissive once the fuzzy ratios improved: a weak-but-real email
-# field (e.g. "nbashir@atreos.com" vs the ATREOS query tokens) started scoring
+# field (e.g. "merchant5@example.com" vs the ATREOS query tokens) started scoring
 # ~50-60, was kept, and dragged the alias-confirmed row to 97.7 — below the
 # bare 100.0 sibling rows, burying the email-carrying record outside the top.
 ALIAS_MIN_FIELD_SCORE = 70.0

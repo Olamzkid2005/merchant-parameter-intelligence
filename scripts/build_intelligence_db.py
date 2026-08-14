@@ -776,7 +776,24 @@ def verify_search(db_path: Optional[Path] = None) -> bool:
     logger.info("  VERIFICATION: Sample searches against intelligence.db")
     logger.info("=" * 70)
 
-    for query in ["LAGOON WATERS LTD", "THE FILM HOUSE", "08098726020", "MX183544"]:
+    # Sample queries include a real phone pulled from the freshly built DB
+    # (the repo never hardcodes merchant contact data).
+    _sample_phone = ""
+    try:
+        import sqlite3 as _sql
+        _c = _sql.connect(db_path)
+        _row = _c.execute(
+            "SELECT phone FROM merchants WHERE phone LIKE '080%' "
+            "AND length(phone)=11 LIMIT 1").fetchone()
+        _c.close()
+        if _row:
+            _sample_phone = _row[0]
+    except Exception:
+        pass
+    queries = ["LAGOON WATERS LTD", "THE FILM HOUSE", "MX183544"]
+    if _sample_phone:
+        queries.insert(2, _sample_phone)
+    for query in queries:
         logger.info(f"\n  🔍 Query: {query}")
         results = searcher.search(query, limit=3, min_score=0)
         if results:

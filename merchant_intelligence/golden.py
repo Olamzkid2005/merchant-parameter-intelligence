@@ -9,92 +9,157 @@ matches an expected name — the same ground truth the user verified by hand.
 Shared by:
   - archive/benchmark.py  (the classic per-merchant benchmark)
   - scripts/self_improve.py (the alias-free regression harness)
+
+PRIVACY: real confirmed emails are merchant contact data and are NOT
+committed to the repo. They live in the gitignored local file
+`data/golden_emails.json` (keyed by query) and are loaded at runtime;
+when that file is absent the committed placeholder emails are used
+(ground truth degrades to name-matching only).
 """
 
+import json
 import re
+from pathlib import Path
+
+
+def _load_real_emails():
+    """Real confirmed emails from the gitignored local file, if present.
+
+    The file lives next to the source data (data/golden_emails.json) so it
+    never enters version control. Absent on a fresh clone -> {} and the
+    placeholder emails in GOLDEN below are used.
+    """
+    try:
+        # golden.py sits at <root>/merchant_intelligence/golden.py, so two
+        # parents up is the project root; data/ is gitignored next to it.
+        path = (Path(__file__).resolve().parent.parent
+                / "data" / "golden_emails.json")
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+_REAL_EMAILS = _load_real_emails()
+
+
+def _emails_for(query: str, placeholder: list) -> list:
+    """Real emails when the local gitignored file has them, else placeholders."""
+    return _REAL_EMAILS.get(query, placeholder)
 
 # ── Golden set ─────────────────────────────────────────────────────────────
 # query        : the merchant name as it appears in the user's reference sheet
 # emails       : confirmed email(s) from that sheet (ground truth)
 # names        : expected parameter-file merchant names (from the sheet / NNPC)
 # note         : context, optional
+# Email placeholders (kept distinct per entry so ties still break). Real
+# confirmed emails are injected from data/golden_emails.json at runtime.
 GOLDEN = [
-    {"query": "ADDIDE OGBA", "emails": ["a11ogba@addide.com"],
+    {"query": "ADDIDE OGBA",
+     "emails": _emails_for("ADDIDE OGBA", ["merchant1@example.com"]),
      "names": ["ADDIDE OGBA", "ADDIDE LIMITED"]},
     {"query": "A-PURE LIFESTYLE PHARMACY NIGERIA LIMITED (A/C 2)",
-     "emails": ["m.ajayi@purelifepharmacy.ng"], "names": []},
+     "emails": _emails_for("A-PURE LIFESTYLE PHARMACY NIGERIA LIMITED (A/C 2)",
+                            ["merchant2@example.com"]), "names": []},
     {"query": "Artee Industries Limited",
-     "emails": ["account.treasury@arteegroup.com", "suresh.mk@arteegroup.com"],
+     "emails": _emails_for("Artee Industries Limited",
+                            ["merchant3@example.com", "merchant4@example.com"]),
      "names": ["ARTEE INDUSTRIES LIMITED"]},
     {"query": "ATREOS RETAIL PLATFORM LIMITED-ACME (NGN)",
-     "emails": ["nbashir@atreos.com"], "names": []},
+     "emails": _emails_for("ATREOS RETAIL PLATFORM LIMITED-ACME (NGN)",
+                            ["merchant5@example.com"]), "names": []},
     {"query": "BEACONHEALTH DIAGNOSTICS",
-     "emails": ["adomanager@beaconhealth.io"], "names": ["BEACON HEALTH ADO"]},
+     "emails": _emails_for("BEACONHEALTH DIAGNOSTICS",
+                            ["merchant6@example.com"]),
+     "names": ["BEACON HEALTH ADO"]},
     {"query": "BIDGBENGA NIG LTD",
-     "emails": ["accounts@biddeloilandgas.com"], "names": ["BIDDEL OIL AND GAS"]},
+     "emails": _emails_for("BIDGBENGA NIG LTD", ["merchant7@example.com"]),
+     "names": ["BIDDEL OIL AND GAS"]},
     {"query": "BOMART INTEGRATED SERVICES NIG LTD",
-     "emails": ["aa@bomartworld.com"], "names": ["BOMART INTEGRATED SERVICES"]},
+     "emails": _emails_for("BOMART INTEGRATED SERVICES NIG LTD",
+                            ["merchant8@example.com"]),
+     "names": ["BOMART INTEGRATED SERVICES"]},
     {"query": "CRANE FIELD INTERNMATIONAL SCHOOL JEDDO",
-     "emails": ["me@yahoo.com"], "names": [],
-     "note": "weak ground truth (generic me@yahoo.com via slip header)"},
+     "emails": _emails_for("CRANE FIELD INTERNMATIONAL SCHOOL JEDDO",
+                            ["merchant9@example.com"]), "names": [],
+     "note": "weak ground truth (generic email via slip header)"},
     {"query": "DENIKE AGORO ENTERPRISES",
-     "emails": ["f.ailoyafen@medplusng.com"],
+     "emails": _emails_for("DENIKE AGORO ENTERPRISES",
+                            ["merchant10@example.com"]),
      "names": ["ADENIKE AGORO", "MEDPLUS PHARMACY"]},
     {"query": "DIVINE HARCO MEDICINES",
-     "emails": ["divineharcomedicines@gmail.com"],
+     "emails": _emails_for("DIVINE HARCO MEDICINES",
+                            ["merchant11@example.com"]),
      "names": ["DIVINE HARCO MEDICINES"]},
     {"query": "EBENEZER OJO OLADAPO",
-     "emails": ["ebenezeronwayadi@gmail.com"],
+     "emails": _emails_for("EBENEZER OJO OLADAPO", ["merchant12@example.com"]),
      "names": ["EBENEZER ONWAYADI 1"]},
     {"query": "E'SORAE HOME STORES LIMITED(IKOTA STORE)",
-     "emails": ["finance@esoraehome.com"], "names": ["ESORAE IKOYI", "ESORAE IKOTA"]},
+     "emails": _emails_for("E'SORAE HOME STORES LIMITED(IKOTA STORE)",
+                            ["merchant13@example.com"]),
+     "names": ["ESORAE IKOYI", "ESORAE IKOTA"]},
     {"query": "FENCHURCH SERVICES LIMITED",
      "emails": [], "names": [], "note": "no ground truth in reference sheet"},
     {"query": "FOLASHADE OLAJUMOKE KALEJAIYE",
-     "emails": ["phola.isaac@gmail.com"], "names": []},
+     "emails": _emails_for("FOLASHADE OLAJUMOKE KALEJAIYE",
+                            ["merchant14@example.com"]), "names": []},
     {"query": "G&G MULTISERVICES INVESTMENT LIMITED",
-     "emails": ["giftgodson00@gmail.com", "godsononyiri@gmail.com"],
+     "emails": _emails_for("G&G MULTISERVICES INVESTMENT LIMITED",
+                            ["merchant15@example.com", "merchant16@example.com"]),
      "names": ["G & G ENTERPRISE", "G & G ENTERPRISES", "G&G STORES"]},
     {"query": "HARRISON OGOCHUKWU EZEASOMBA",
-     "emails": ["harrisbliss@yahoo.com"], "names": []},
+     "emails": _emails_for("HARRISON OGOCHUKWU EZEASOMBA",
+                            ["merchant17@example.com"]), "names": []},
     {"query": "HEAVENLY DEWS GLOBAL CONCEPTS LIMITED",
-     "emails": ["ooladehin@bheerhugz.com"],
+     "emails": _emails_for("HEAVENLY DEWS GLOBAL CONCEPTS LIMITED",
+                            ["merchant18@example.com"]),
      "names": ["HEAVENLY DEWS GLOBAL CONCEPT", "BHEERHUGZ CAFE"]},
     {"query": "KELIZZ INTEGRATED SERVICES LIMITED",
-     "emails": ["kcee094@gmail.com"], "names": []},
+     "emails": _emails_for("KELIZZ INTEGRATED SERVICES LIMITED",
+                            ["merchant19@example.com"]), "names": []},
     {"query": "LAGOON WATERS LTD",
-     "emails": ["dejiladgroup@yahoo.com"], "names": ["LAGOON WATERS"]},
+     "emails": _emails_for("LAGOON WATERS LTD", ["merchant20@example.com"]),
+     "names": ["LAGOON WATERS"]},
     {"query": "MARYLAND MALL LIMITED REVENUE COLLECTION ACCOUNT",
-     "emails": ["temitope@purple.xyz"], "names": ["SWEB_MARYLAND MALL"]},
+     "emails": _emails_for("MARYLAND MALL LIMITED REVENUE COLLECTION ACCOUNT",
+                            ["merchant21@example.com"]),
+     "names": ["SWEB_MARYLAND MALL"]},
     {"query": "MONEYTRUST MICROFINANACE BANK LTD",
-     "emails": ["info@cascadeslux.com"],
+     "emails": _emails_for("MONEYTRUST MICROFINANACE BANK LTD",
+                            ["merchant22@example.com"]),
      "names": ["CASCADES LUXURY LIMITED", "CASCADES LUXE"]},
     {"query": "MUSSAN OIL NIGERIA LIMITED",
-     "emails": ["amusan_777@yahoo.com"], "names": ["KOLA AMUSAN"]},
+     "emails": _emails_for("MUSSAN OIL NIGERIA LIMITED",
+                            ["merchant23@example.com"]), "names": ["KOLA AMUSAN"]},
     {"query": "NEWHEALTH PHARMACY LTD 3",
      "emails": [], "names": [], "note": "no ground truth in reference sheet"},
     {"query": "NWANERI VICTOR",
-     "emails": ["nwanerivictor457@gmail.com"], "names": ["IKATI VICTOR"]},
+     "emails": _emails_for("NWANERI VICTOR", ["merchant24@example.com"]),
+     "names": ["IKATI VICTOR"]},
     {"query": "OLWADAMS PETROLEUM OIL AND GAS RESOURCES LIMITED",
      "emails": [], "names": [], "note": "no ground truth in reference sheet"},
     {"query": "PETER CHIDI ANUCHA",
-     "emails": ["chidi_anucha@yahoo.com"], "names": ["PETER ANUCHA"]},
+     "emails": _emails_for("PETER CHIDI ANUCHA", ["merchant25@example.com"]),
+     "names": ["PETER ANUCHA"]},
     {"query": "PICCADILLY SUITES",
-     "emails": ["sam.ifeozo@gmail.com"], "names": ["PICCADILLY SUITES"]},
+     "emails": _emails_for("PICCADILLY SUITES", ["merchant26@example.com"]),
+     "names": ["PICCADILLY SUITES"]},
     {"query": "POWERFOIL GLOBAL SERVICES LIIMITED",
      "emails": [], "names": [], "note": "no ground truth in reference sheet"},
     {"query": "REIZ CONTINENTAL HOTELS LIMITED",
-     "emails": ["reiz.reizcontinentalhotelabuja@gmail.com"],
+     "emails": _emails_for("REIZ CONTINENTAL HOTELS LIMITED",
+                            ["merchant27@example.com"]),
      "names": ["REIZ CONTINENTAL HOTELS LIMITED"]},
     {"query": "ROSEFUN VENTURES",
      "emails": [], "names": [], "note": "no ground truth in reference sheet"},
     {"query": "RUBELS AND ANGELS RESTAURANT AJAO ESTATE BRANCH",
-     "emails": ["chiderachristopher@gmail.com"],
+     "emails": _emails_for("RUBELS AND ANGELS RESTAURANT AJAO ESTATE BRANCH",
+                            ["merchant28@example.com"]),
      "names": ["RUBELS AND ANGELS AJAO ESTATE BRANCH"]},
     {"query": "SEE BY JEF LIMITED",
-     "emails": ["ewa_david@yahoo.com"], "names": ["SEE BY JEF LIMITED"]},
+     "emails": _emails_for("SEE BY JEF LIMITED", ["merchant29@example.com"]),
+     "names": ["SEE BY JEF LIMITED"]},
     {"query": "THE FILM HOUSE LIMITED",
-     "emails": ["smonsuru@filmhouseng.com"],
+     "emails": _emails_for("THE FILM HOUSE LIMITED", ["merchant30@example.com"]),
      "names": ["FILMHOUSE", "FILM HOUSE", "FILMHOUSE CINEMA"]},
 ]
 
