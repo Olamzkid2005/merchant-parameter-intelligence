@@ -1,0 +1,38 @@
+# Virtual environment
+.venv/
+
+# Runtime logs & PID files (all live in logs/)
+logs/
+
+# Test temp artifacts
+_watch_test_dir/
+_watch_test.log
+_watch_test_probe.db*
+
+# Python bytecode / caches
+__pycache__/
+*.pyc
+
+# Generated reports / exports
+reports/*.xlsx
+
+# Databases are generated from source Excel files
+data/*.db
+data/*.db-wal
+data/*.db-shm
+/*.db
+
+# Source data (proprietary Excel workbooks + derived exports) never leaves
+# the machine — the app builds its DBs from them at runtime.
+data/
+*.xlsx
+*.xls
+
+# Frontend build output + dependencies
+web/node_modules/
+web/dist/
+
+# One-off diagnostic probes
+probe_*.py
+_test_*.py
+_test_*/

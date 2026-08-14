@@ -1,0 +1,804 @@
+{
+  "_help": "Intent patterns for the task engine. Tune these without touching code.\n\nEach intent has:\n  patterns  -> list of {pattern: <regex>, weight: <number>}. Detection scores\n               each pattern and confidence = min(100, score * 12), so a strong\n               phrase (weight 8) is ~96 while a generic word (weight 3) is ~36\n               and never tips a plain search into a task on its own.\n  keywords  -> plain words used for the LLM refinement prompt + result\n               validation (keep in sync with patterns).\n  fuzzy     -> true/false (default true). When true, requests that miss\n               every pattern but strongly overlap a keyword (typo like\n               \"sttic\" -> static, or a close paraphrase) still classify as\n               this intent. Set false to restrict the intent to exact regex\n               matches only.\n\nWhole lines starting with // or # are treated as comments and ignored.\nUse \\\\b word boundaries in regexes (JSON requires the double backslash). Requests are lowercased before matching, so write patterns in lowercase. Keywords also act as soft fuzzy patterns - a request that strongly overlaps a keyword (but hits no pattern) still classifies. Requests can exclude intents (e.g. 'but not the change history').\n\nSlang expansion: the top-level \"slang\" object maps common\nabbreviations to their canonical form BEFORE matching (acct -> account,\nmgr -> manager, deets -> details, stmnt -> statement). Keys must be\nlowercase words of 3+ chars; add your team's short-hands here.\nIMPORTANT: patterns and keywords are matched against the NORMALISED text,\nso write them in canonical form (\"account\", not \"acct\") — slang forms\nlive in the slang map, never in patterns.\n\nADDING A BRAND-NEW INTENT (end-to-end):\n\n1) intents.json - add an \"<intent>\" block under \"intents\" with weighted\n   patterns + keywords (copy an existing intent as a template).\n2) pipelines.py - write _pipeline_<intent>(conn, task) returning a render-ready\n   table {columns, rows, summary, not_found} (copy _pipeline_email), then\n   register it in the _PIPELINES dict. Without this, the intent silently falls\n   back to generic _pipeline_resolve.\n3) vocab.py - mirror the same patterns + keywords into\n   _DEFAULT_INTENT_PATTERNS / _DEFAULT_INTENT_KEYWORDS. The [4h] parity test\n   asserts config == defaults, so a config-only intent fails tests.\n4) Optional: NAME_CAPABLE_INTENTS (name-only requests like \"get <field> for\n   MEDPLUS\"), CHAINABLE (suggestion chips + compound merge), SEGMENT_FIELDS\n   (collection requests like \"all <field> of all NNPC\"), NAME_STOP_WORDS\n   (keep phrase words out of extracted names). LLM refinement accepts any\n   intent in INTENT_KEYWORDS automatically.\n5) Restart (python app.start app), run python tests/test_tasks.py, then try\n   \"get <field> for MX141692\" in the search box.\n",
+  "slang": {
+    "acct": "account",
+    "accts": "accounts",
+    "mgr": "manager",
+    "deets": "details",
+    "stmnt": "statement",
+    "stmt": "statement",
+    "numb": "number",
+    "benef": "beneficiary",
+    "addr": "address",
+    "mob": "mobile",
+    "tel": "telephone"
+  },
+  "intents": {
+    "static_account": {
+      "patterns": [
+        {
+          "pattern": "\\bstatic account\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bstatic acct\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bstatic acc\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bstatic acct manager\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bbeneficiary name\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bstatic bank\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bbeneficiary\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bacct manager\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\baccount manager\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bpayable code\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bpayables?\\b",
+          "weight": 4
+        },
+        {
+          "pattern": "\\bmapped to\\b",
+          "weight": 3
+        },
+        {
+          "pattern": "\\baliases?\\b",
+          "weight": 3
+        }
+      ],
+      "keywords": [
+        "static account",
+        "static acct",
+        "beneficiary",
+        "alias",
+        "payable",
+        "static bank",
+        "acct manager",
+        "account manager"
+      ],
+      "fuzzy": true
+    },
+    "mxcode": {
+      "patterns": [
+        {
+          "pattern": "\\bmx[- ]?codes?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bmerchant code\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "mxcode",
+        "mx code",
+        "merchant code"
+      ],
+      "fuzzy": true
+    },
+    "tid": {
+      "patterns": [
+        {
+          "pattern": "\\bterminal ids?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\btids?\\b",
+          "weight": 4
+        }
+      ],
+      "keywords": [
+        "tid",
+        "tids",
+        "terminal id",
+        "terminal ids"
+      ],
+      "fuzzy": true
+    },
+    "email": {
+      "patterns": [
+        {
+          "pattern": "\\be[- ]?mails?\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "email",
+        "emails",
+        "e-mail"
+      ],
+      "fuzzy": true
+    },
+    "bank": {
+      "patterns": [
+        {
+          "pattern": "\\bbank names?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bbanks?\\b",
+          "weight": 3
+        },
+        {
+          "pattern": "\\bwhich banks?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bwhat(?:'s| is)? (?:the )?banks?\\b",
+          "weight": 6
+        }
+      ],
+      "keywords": [
+        "bank",
+        "banks",
+        "bank name",
+        "which bank",
+        "what bank"
+      ],
+      "fuzzy": true
+    },
+    "phone": {
+      "patterns": [
+        {
+          "pattern": "\\bphone numbers?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bmobile numbers?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\btelephones?\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bphones?\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "phone",
+        "telephone",
+        "mobile number"
+      ],
+      "fuzzy": true
+    },
+    "address": {
+      "patterns": [
+        {
+          "pattern": "\\baddress(?:es)?\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\blocations?\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "address",
+        "addresses",
+        "location",
+        "locations"
+      ],
+      "fuzzy": true
+    },
+    "account_name": {
+      "patterns": [
+        {
+          "pattern": "\\baccount names?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\baccount holder\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "account name",
+        "account holder"
+      ],
+      "fuzzy": true
+    },
+    "account_number": {
+      "patterns": [
+        {
+          "pattern": "\\baccount numbers?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bacc numbers?\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "account number",
+        "acc number"
+      ],
+      "fuzzy": true
+    },
+    "payable": {
+      "patterns": [
+        {
+          "pattern": "\\bpayable codes?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bpayables?\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "payable",
+        "payable code"
+      ],
+      "fuzzy": true
+    },
+    "alias": {
+      "patterns": [
+        {
+          "pattern": "\\balias codes?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\baliases?\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "alias",
+        "alias code"
+      ],
+      "fuzzy": true
+    },
+    "contact": {
+      "patterns": [
+        {
+          "pattern": "\\bcontact (?:person|persons|name|names)\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bcontacts?\\b",
+          "weight": 4
+        }
+      ],
+      "keywords": [
+        "contact",
+        "contact person",
+        "contact name"
+      ],
+      "fuzzy": true
+    },
+    "onboarded": {
+      "patterns": [
+        {
+          "pattern": "\\bonboarded?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bonboarding date\\b",
+          "weight": 6
+        }
+      ],
+      "keywords": [
+        "onboarded",
+        "onboarding date"
+      ],
+      "fuzzy": true
+    },
+    "state": {
+      "patterns": [
+        {
+          "pattern": "\\bwhich state\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bwhat state\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bstate\\b",
+          "weight": 3
+        }
+      ],
+      "keywords": [
+        "state"
+      ],
+      "fuzzy": true
+    },
+    "source": {
+      "patterns": [
+        {
+          "pattern": "\\bwhich (?:file|sheet)\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bwhat (?:file|sheet)\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bsources?\\b",
+          "weight": 3
+        }
+      ],
+      "keywords": [
+        "source",
+        "which file",
+        "which sheet"
+      ],
+      "fuzzy": true
+    },
+    "beneficiary": {
+      "patterns": [
+        {
+          "pattern": "\\bbeneficiar(?:y|ies)\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "beneficiary"
+      ],
+      "fuzzy": true
+    },
+    "change_details": {
+      "patterns": [
+        {
+          "pattern": "\\bchange of account\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bchange of merchant\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bchange details\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\baccount change\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bmerchant change\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bchanged account\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bchange history\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bchanged from\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bchanged to\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\baccount details\\b",
+          "weight": 4
+        },
+        {
+          "pattern": "\\bold account\\b",
+          "weight": 4
+        },
+        {
+          "pattern": "\\bnew account\\b",
+          "weight": 4
+        },
+        {
+          "pattern": "\\bold bank\\b",
+          "weight": 4
+        },
+        {
+          "pattern": "\\bnew bank\\b",
+          "weight": 4
+        },
+        {
+          "pattern": "\\bold address\\b",
+          "weight": 4
+        },
+        {
+          "pattern": "\\bnew address\\b",
+          "weight": 4
+        }
+      ],
+      "keywords": [
+        "change of account",
+        "change of merchant",
+        "change details",
+        "account change",
+        "old account",
+        "new account",
+        "old bank",
+        "new bank",
+        "old address",
+        "new address",
+        "change history",
+        "account details"
+      ],
+      "fuzzy": true
+    },
+    "profile": {
+      "patterns": [
+        {
+          "pattern": "\\bfull profile\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\beverything (?:about|on|for|regarding)\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\beverything\\b",
+          "weight": 4
+        },
+        {
+          "pattern": "\\banything (?:about|on|for)\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\ball the information\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bprofile\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\binformation\\b",
+          "weight": 4
+        },
+        {
+          "pattern": "\\bdetails?\\b",
+          "weight": 3
+        },
+        {
+          "pattern": "\\binfo\\b",
+          "weight": 3
+        }
+      ],
+      "keywords": [
+        "profile",
+        "full profile",
+        "information",
+        "everything about",
+        "everything on",
+        "anything about",
+        "anything on",
+        "details",
+        "info"
+      ],
+      "fuzzy": true
+    },
+    "count": {
+      "patterns": [
+        {
+          "pattern": "\\bhow many\\b",
+          "weight": 9
+        },
+        {
+          "pattern": "\\btotal number of\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bcount\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bhow often\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bnumber of\\b",
+          "weight": 4
+        }
+      ],
+      "keywords": [
+        "how many",
+        "count",
+        "number of",
+        "total number of"
+      ],
+      "fuzzy": true
+    },
+    "duplicates": {
+      "patterns": [
+        {
+          "pattern": "\\bduplicates?\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bappears? more than once\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bsame merchant\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\brepeated\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "duplicate",
+        "same merchant",
+        "repeated",
+        "more than once"
+      ],
+      "fuzzy": true
+    },
+    "summary": {
+      "patterns": [
+        {
+          "pattern": "\\bsummar[a-z]*\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\boverview\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bhigh.level\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bbreakdown\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bstats?\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "summary",
+        "summarize",
+        "overview",
+        "breakdown",
+        "stats"
+      ],
+      "fuzzy": true
+    },
+    "related": {
+      "patterns": [
+        {
+          "pattern": "\\bwho else\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\buses this\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\brelated\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\blinked to\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bconnected\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bassociated\\b",
+          "weight": 6
+        }
+      ],
+      "keywords": [
+        "related",
+        "who else",
+        "linked to",
+        "connected",
+        "associated"
+      ],
+      "fuzzy": true
+    },
+    "formerly": {
+      "patterns": [
+        {
+          "pattern": "\\bformerly\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\brenamed\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bname variants?\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bpreviously known\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bknown as\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "formerly",
+        "renamed",
+        "name variants",
+        "known as",
+        "previously known"
+      ],
+      "fuzzy": true
+    },
+    "compare": {
+      "patterns": [
+        {
+          "pattern": "\\bcompare\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bversus\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bvs\\.?\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bside.by.side\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bdifference between\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "compare",
+        "versus",
+        "vs",
+        "side by side",
+        "difference between"
+      ],
+      "fuzzy": true
+    },
+    "coverage": {
+      "patterns": [
+        {
+          "pattern": "\\bcoverage\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bmissing\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bwith no\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bhas no\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bhave no\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\blacking\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bincomplete\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bwithout\\b",
+          "weight": 6
+        }
+      ],
+      "keywords": [
+        "coverage",
+        "missing",
+        "without",
+        "with no",
+        "has no",
+        "lacking",
+        "incomplete"
+      ],
+      "fuzzy": true
+    },
+    "top": {
+      "patterns": [
+        {
+          "pattern": "\\btop \\d+\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bmost common\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bper state\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bby state\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\branking\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bmost popular\\b",
+          "weight": 5
+        }
+      ],
+      "keywords": [
+        "top",
+        "most common",
+        "per state",
+        "by state",
+        "ranking"
+      ],
+      "fuzzy": true
+    },
+    "verify": {
+      "patterns": [
+        {
+          "pattern": "\\bin the registry\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bin the database\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bverify\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bregistered\\b",
+          "weight": 5
+        },
+        {
+          "pattern": "\\bvalid\\b",
+          "weight": 4
+        }
+      ],
+      "keywords": [
+        "verify",
+        "in the registry",
+        "registered",
+        "valid"
+      ],
+      "fuzzy": true
+    }
+  }
+}

@@ -1,0 +1,660 @@
+#!/usr/bin/env python3
+"""
+app.start — one-command launcher for the Merchant Intelligence stack.
+
+    python app.start app            # start backend + frontend with health checks
+    python app.start app --rebuild  # rebuild ALL THREE databases, then start
+    python app.start rebuild        # rebuild ALL THREE databases and exit
+    python app.start stop           # stop a running launch (kills by port + pid)
+    python app.start status         # show what is currently running
+
+Flags:
+    --rebuild           rebuild merchant_search.db + intelligence.db + merchant_intel.db
+                        from the Excel files before starting (so the databases never
+                        drift apart) - implied by the `rebuild` command
+    --no-web            backend only
+    --no-api            frontend only
+    --api-port PORT     backend port          (default 8000)
+    --web-port PORT     frontend port         (default 5173)
+    --timeout SECONDS   max wait for each service to become healthy (default 60)
+    --open              auto-open the browser once services are healthy
+    --foreground        stream both services' logs to the console in real time
+                        (alias: --log-follow)
+
+What it does before startup:
+    1. checks the project venv exists
+    2. verifies backend dependencies import (fastapi, uvicorn, pandas, openpyxl)
+    3. verifies the active intelligence.db exists
+    4. verifies web/node_modules exists (hints npm install)
+    5. runs the frontend utils sanity check (web/scripts/check-export-name.mjs)
+    6. verifies the target ports are free (or already healthy -> reuse)
+
+Then it starts uvicorn (api.py) and the Vite dev server (web/), polls each
+service's health endpoint until ready, prints READY URLs, and stays attached
+so Ctrl+C shuts both down.
+"""
+import argparse
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import threading
+import time
+import urllib.request
+import webbrowser
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
+WEB_DIR = ROOT / "web"
+LOG_DIR = ROOT / "logs"
+API_LOG = LOG_DIR / "_app.start.api.log"
+WEB_LOG = LOG_DIR / "_app.start.web.log"
+API_PID = LOG_DIR / ".app.start.api.pid"
+WEB_PID = LOG_DIR / ".app.start.web.pid"
+
+
+# ── database rebuild ─────────────────────────────────────────────────────
+
+def rebuild_databases():
+    """Rebuild ALL THREE databases from the Excel files so they never drift.
+
+    Pipeline order (each step's output feeds the next):
+      1. scripts/rebuild_db.py          -> merchant_search.db (main 2ISW workbook)
+      2. scripts/build_intelligence_db.py -> intelligence.db (ALL Excel files - the
+                                    database the app actually loads)
+      3. scripts/sync_intel_db.py       -> merchant_intel.db (copies merchant_search.db
+                                    so the legacy DB stays in sync)
+      4. scripts/self_improve.py        -> alias-free regression harness: measures the
+                                    RAW engine strength, gates on recall@1 regression
+                                    (first run records the baseline), and auto-suggests
+                                    alias candidates into the pending review queue.
+
+    Each script verifies its own output and exits non-zero on failure, so a
+    failure here aborts startup.
+
+    Returns True when all three steps succeeded.
+    """
+    print("=" * 60)
+    print("  REBUILDING DATABASES")
+    print("  (merchant_search.db + intelligence.db + merchant_intel.db)")
+    print("=" * 60)
+    steps = [
+        ("merchant_search.db", [str(VENV_PY), "scripts/rebuild_db.py"]),
+        ("intelligence.db",    [str(VENV_PY), "scripts/build_intelligence_db.py"]),
+        ("merchant_intel.db",  [str(VENV_PY), "scripts/sync_intel_db.py"]),
+    ]
+
+    # Feature #10 — self-improving harness: after every rebuild, measure the
+    # ALIAS-FREE engine strength and gate on regression. First run records the
+    # baseline; later runs fail the rebuild if recall@1 drops. Misses get
+    # alias suggestions dropped into the pending review queue automatically.
+    steps.append(("self-improve harness (alias-free gate)",
+                  [str(VENV_PY), "scripts/self_improve.py"]))
+    if not VENV_PY.exists():
+        print(f"  [X] venv missing at {VENV_PY}\n"
+              f"      Create it first:\n"
+              f"        python -m venv .venv\n"
+              f"        {VENV_PY} -m pip install fastapi uvicorn pandas openpyxl")
+        return False
+
+    # Rebuilding deletes the database files the running services hold open —
+    # fail fast with a clear hint instead of a confusing PermissionError later.
+    if http_ok(api_url(8000)) or http_ok(web_url(5173)):
+        print("  [X] A service instance is already running (API :8000 or Web :5173)"
+              "\n      Stop it first so the database files are not locked:\n"
+              f"        {sys.argv[0]} stop")
+        return False
+
+    ok = True
+    for name, cmd in steps:
+        print(f"\n--- Rebuilding {name} ...")
+        try:
+            r = subprocess.run(cmd, cwd=str(ROOT), timeout=1800)
+        except OSError as e:
+            print(f"  [X] {name} rebuild could not start ({e})")
+            ok = False
+            continue
+        except subprocess.TimeoutExpired:
+            print(f"  [X] {name} rebuild timed out after 30 minutes")
+            ok = False
+            continue
+        if r.returncode != 0:
+            print(f"  [X] {name} rebuild FAILED (exit {r.returncode})")
+            ok = False
+        else:
+            print(f"  [OK] {name} rebuilt")
+    print("\n" + "=" * 60)
+    print("  DATABASE REBUILD " + ("COMPLETE" if ok else "FAILED"))
+    print("=" * 60)
+    return ok
+
+
+def http_ok(url, timeout=2.0):
+    """True when `url` answers 200.
+
+    Bypasses the system proxy on purpose: urllib.request picks up Windows
+    WinINET proxy settings from the registry even with no env vars set, and
+    a stale proxy entry makes it fail to reach 127.0.0.1 — the health checks
+    would always time out while the services themselves start fine.
+    """
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(url, timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def port_busy(port, host="127.0.0.1"):
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def api_url(port):
+    return f"http://127.0.0.1:{port}/api/health"
+
+
+def web_url(port):
+    return f"http://127.0.0.1:{port}/"
+
+
+def open_browser(url):
+    """Open `url` in the default browser. Best-effort - never raises."""
+    print(f"  Opening browser: {url}")
+    try:
+        opened = webbrowser.open(url)
+        if not opened:
+            print(f"  [X] Could not open a browser - open {url} manually.")
+    except Exception as e:
+        print(f"  [X] Browser open failed ({e}) - open {url} manually.")
+
+
+# ── pre-flight checks ────────────────────────────────────────────────────
+
+def _reclaim_port(name, port, url, retries=3, wait=1.0):
+    """Make sure `port` is usable for `name`.
+
+    Cases:
+      - already healthy   -> reuse it ("already running")
+      - free              -> good
+      - busy but NOT healthy -> almost always an orphaned process from a
+        previous launch (the batch window was closed with the X button
+        instead of Ctrl+C, so uvicorn/node survived and kept the port).
+        Kill those stale listeners and retry a few times, so a double-click
+        always gets through instead of silently failing.
+
+    Returns (port, usable).
+    """
+    if http_ok(url):
+        print(f"  [OK] {name} already healthy on :{port} - will reuse")
+        return port, True
+    if not port_busy(port):
+        print(f"  [OK] port {port} free ({name})")
+        return port, True
+    print(f"  [!] port {port} busy but not healthy ({name}) "
+          "- reclaiming stale process(es)...")
+    for attempt in range(retries):
+        _kill_pids(_listener_pids(port), only_app=True)
+        time.sleep(wait)
+        if not port_busy(port):
+            print(f"  [OK] port {port} reclaimed ({name})")
+            return port, True
+    print(f"  [X] port {port} is occupied by another process ({name})")
+    return port, False
+
+
+def preflight(args):
+    print("==== Pre-flight checks ====")
+    ok = True
+
+    if not VENV_PY.exists():
+        print(f"  [X] venv missing at {VENV_PY}\n"
+              f"      Create it first:\n"
+              f"        python -m venv .venv\n"
+              f"        {VENV_PY} -m pip install fastapi uvicorn pandas openpyxl")
+        ok = False
+    else:
+        print(f"  [OK] venv: {VENV_PY.name}")
+
+    if not args.no_api:
+        deps = subprocess.run(
+            [str(VENV_PY), "-c", "import fastapi, uvicorn, pandas, openpyxl"],
+            capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+        if deps.returncode != 0:
+            print("  [X] backend deps missing - run: "
+                  f"{VENV_PY} -m pip install fastapi uvicorn pandas openpyxl")
+            ok = False
+        else:
+            print("  [OK] backend deps: fastapi, uvicorn, pandas, openpyxl")
+
+        db = subprocess.run(
+            [str(VENV_PY), "-c",
+             "from merchant_intelligence import config; print(config.active_db())"],
+            capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+        db_path = (db.stdout or "").strip()
+        if not db_path or not Path(db_path).exists():
+            print("  [X] intelligence.db missing - run: "
+                  f"{VENV_PY} build_intelligence_db.py")
+            ok = False
+        else:
+            print(f"  [OK] DB: {Path(db_path).name}")
+
+    if not args.no_web:
+        if not (WEB_DIR / "node_modules").exists():
+            print("  [X] web deps missing - run: cd web && npm install")
+            ok = False
+        else:
+            print("  [OK] web deps: node_modules present")
+        npm = shutil.which("npm") or shutil.which("npm.cmd")
+        if not npm:
+            print("  [X] npm not found on PATH")
+            ok = False
+        else:
+            print("  [OK] npm found")
+        node = shutil.which("node") or shutil.which("node.exe")
+        if not node:
+            print("  [X] node not found on PATH (needed for frontend sanity checks)")
+            ok = False
+        else:
+            # Frontend utility sanity check (export filename logic). Run the
+            # node script directly rather than `npm run test:exports` so the
+            # preflight works even when the npm shim misbehaves.
+            fe = subprocess.run(
+                [node, "scripts/check-export-name.mjs"],
+                capture_output=True, text=True, cwd=str(WEB_DIR), timeout=60)
+            if fe.returncode != 0:
+                print("  [X] frontend utils sanity check FAILED - run: "
+                      "cd web && npm run test:exports")
+                # Surface the actual failing checks (the [FAIL] lines carry
+                # the mismatch detail) rather than a fixed tail of output.
+                failed = [ln.strip() for ln in (fe.stdout or "").splitlines()
+                          if "[FAIL]" in ln]
+                if not failed:
+                    failed = [(fe.stdout or "").strip().splitlines() or [""]][0][-1:]
+                for line in failed[:8]:
+                    print(f"      {line}")
+                ok = False
+            else:
+                passed = sum(1 for ln in (fe.stdout or "").splitlines()
+                             if "[PASS]" in ln)
+                print(f"  [OK] frontend utils sanity check ({passed} checks)")
+
+    if not args.no_api:
+        args.api_port, ok_api = _reclaim_port("API", args.api_port,
+                                              api_url(args.api_port))
+        ok = ok and ok_api
+
+    if not args.no_web:
+        args.web_port, ok_web = _reclaim_port("Web", args.web_port,
+                                              web_url(args.web_port))
+        ok = ok and ok_web
+
+    if not ok:
+        print("==== Pre-flight FAILED - fix the issues above and retry ====")
+        return False
+    print("==== Pre-flight OK ====\n")
+    return True
+
+
+# ── service lifecycle ────────────────────────────────────────────────────
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def _safe_print(text):
+    """Print without crashing on a Windows cp1252 console (ASCII fallback)."""
+    try:
+        print(text, end="", flush=True)
+    except UnicodeEncodeError:
+        print(text.encode("ascii", "replace").decode("ascii"),
+              end="", flush=True)
+
+
+def _pump_log(proc, log_path, tag):
+    """Stream a child's stdout to the console (prefixed with [tag]) AND to the
+    log file. Runs in a daemon thread; ends when the child exits.
+
+    stdout is ALWAYS drained (so the child can never wedge on a full pipe)
+    even if writing the log file fails."""
+    try:
+        LOG_DIR.mkdir(exist_ok=True)
+        log = open(log_path, "w", encoding="utf-8", errors="replace")
+    except OSError:
+        log = None
+    try:
+        for line in proc.stdout:
+            if log is not None:
+                try:
+                    log.write(line)
+                    log.flush()
+                except OSError:
+                    log.close()
+                    log = None
+            _safe_print(f"[{tag}] {_ANSI_RE.sub('', line)}")
+    except Exception:
+        pass  # child died mid-stream — nothing left to drain
+    finally:
+        if log is not None:
+            try:
+                log.close()
+            except OSError:
+                pass
+
+
+def spawn(cmd, cwd, log_path, pid_path, follow=False, tag="svc"):
+    if follow:
+        # Foreground mode: capture the child's stdout and stream it live to
+        # the console via a pump thread (also persists to the log file).
+        proc = subprocess.Popen(
+            cmd, cwd=str(cwd), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            text=True, errors="replace")
+        threading.Thread(target=_pump_log,
+                         args=(proc, log_path, tag), daemon=True).start()
+        log = None
+    else:
+        LOG_DIR.mkdir(exist_ok=True)
+        log = open(log_path, "w")
+        proc = subprocess.Popen(
+            cmd, cwd=str(cwd), stdout=log, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, text=True)
+    try:
+        pid_path.write_text(str(proc.pid))
+    except OSError:
+        pass
+    return proc, log
+
+
+def wait_healthy(name, url, proc, timeout):
+    print(f"  Starting {name}... waiting for {url}")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if http_ok(url):
+            print(f"  [OK] {name} healthy ({url})")
+            return True
+        if proc.poll() is not None:
+            print(f"  [X] {name} process exited early (code {proc.returncode})")
+            return False
+        time.sleep(1)
+    print(f"  [X] {name} did not become healthy within {timeout}s")
+    return False
+
+
+def launch(args):
+    if args.rebuild and not rebuild_databases():
+        print("\n[X] Database rebuild failed - fix the errors above and retry.")
+        sys.exit(1)
+    if not preflight(args):
+        sys.exit(1)
+
+    procs, logs = [], []
+    try:
+        if not args.no_api:
+            if http_ok(api_url(args.api_port)):
+                print(f"API already running at {api_url(args.api_port)}")
+            else:
+                p, log = spawn(
+                    [str(VENV_PY), "-m", "uvicorn", "api:app",
+                     "--host", "127.0.0.1", "--port", str(args.api_port)],
+                    ROOT, API_LOG, API_PID,
+                    follow=args.foreground, tag="API")
+                procs.append(p); logs.append(log)
+                if not wait_healthy("API", api_url(args.api_port), p, args.timeout):
+                    sys.exit(1)
+
+        if not args.no_web:
+            if http_ok(web_url(args.web_port)):
+                print(f"Web already running at {web_url(args.web_port)}")
+            else:
+                p, log = spawn(
+                    ["npm.cmd", "run", "dev", "--",
+                     "--port", str(args.web_port), "--host", "127.0.0.1"],
+                    WEB_DIR, WEB_LOG, WEB_PID,
+                    follow=args.foreground, tag="WEB")
+                procs.append(p); logs.append(log)
+                if not wait_healthy("Web", web_url(args.web_port), p, args.timeout):
+                    sys.exit(1)
+
+        print("\n" + "=" * 60)
+        print("  READY - Merchant Intelligence is up")
+        print(f"    Frontend : {web_url(args.web_port)}")
+        print(f"    API      : http://127.0.0.1:{args.api_port}")
+        if args.foreground:
+            print("    Logs     : streaming to console ([API] / [WEB])")
+        else:
+            print(f"    Logs     : {API_LOG.name} / {WEB_LOG.name}")
+        print("  Press Ctrl+C to stop both.")
+        print("=" * 60)
+
+        if args.open:
+            # Prefer the frontend; fall back to the API when web is disabled.
+            open_browser(web_url(args.web_port) if not args.no_web
+                         else f"http://127.0.0.1:{args.api_port}")
+
+        # Stay attached; report if a service crashes, otherwise wait for Ctrl+C.
+        while True:
+            time.sleep(1)
+            dead = [p for p in procs if p.poll() is not None]
+            if dead:
+                print(f"\n[!] A service exited unexpectedly "
+                      f"(code {dead[0].returncode}) - check the logs.")
+                sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+    finally:
+        kill_tree(procs)
+        for log in logs:
+            if log is None:  # follow mode — pump thread owns the log file
+                continue
+            try:
+                log.close()
+            except OSError:
+                pass
+
+
+def kill_tree(procs):
+    for p in procs:
+        if p.poll() is None:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)],
+                               capture_output=True, text=True)
+            else:
+                try:
+                    p.terminate()
+                    p.wait(timeout=5)
+                except Exception:
+                    pass
+    for pid_path in (API_PID, WEB_PID):
+        try:
+            pid_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+# ── stop / status ────────────────────────────────────────────────────────
+
+_APP_PROC_NAMES = {"python.exe", "pythonw.exe", "node.exe"}
+
+# PIDs app.start recorded itself are ours (the web one is a cmd.exe npm shim,
+# hence cmd.exe). A stale pid file pointing at a reused, now-foreign pid is
+# still refused.
+_TRACKED_PROC_NAMES = _APP_PROC_NAMES | {"cmd.exe"}
+
+
+def _proc_name(pid):
+    """Best-effort image name for a PID (e.g. 'python.exe'). '' on failure."""
+    try:
+        r = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10)
+        for line in (r.stdout or "").splitlines():
+            line = line.strip()
+            if line.startswith('"'):
+                return line.split('"', 2)[1].strip().lower()
+    except Exception:
+        pass
+    return ""
+
+
+def _kill_pids(pids, only_app=False):
+    """taskkill each PID (with its child tree).
+
+    only_app: refuse to kill processes whose image is not python/node, so a
+    busy port never nukes an unrelated service (e.g. another project's Vite
+    dev server that also defaults to :5173).
+    """
+    for pid in pids:
+        if only_app and _proc_name(pid) not in _APP_PROC_NAMES:
+            continue
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)],
+                           capture_output=True, text=True)
+        else:
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+
+
+def _listener_pids(port):
+    """Return PIDs listening on `port` (Windows best-effort)."""
+    try:
+        ps = ("powershell -NoProfile -Command "
+              f"\"$c = Get-NetTCPConnection -LocalPort {port} -State Listen "
+              "-ErrorAction SilentlyContinue; "
+              "if ($c) { $c.OwningProcess } else { '' }\"")
+        r = subprocess.run(ps, shell=True, capture_output=True, text=True,
+                           timeout=8)
+        pids = []
+        for line in (r.stdout or "").splitlines():
+            line = line.strip()
+            if line.isdigit():
+                pids.append(int(line))
+        return pids
+    except Exception:
+        return []
+
+
+def stop(args):
+    # PIDs app.start recorded itself (tracked) vs. whatever is listening on the
+    # app ports (could include an unrelated program, e.g. another project's
+    # Vite also defaults to :5173 - those are only killed if python/node).
+    tracked = set()
+    for pid_path in (API_PID, WEB_PID):
+        if pid_path.exists():
+            try:
+                tracked.add(int(pid_path.read_text().strip()))
+            except (OSError, ValueError):
+                pass
+    listeners = set(_listener_pids(args.api_port))
+    listeners |= set(_listener_pids(args.web_port))
+    listeners -= tracked  # already handled below
+
+    if not tracked and not listeners:
+        print("Nothing to stop - no tracked pids and ports look free.")
+        return
+
+    def _handle(pid, allowed):
+        """Kill `pid` if its image is allowed; report foreign processes.
+        Returns (killed, skip_info_or_None)."""
+        name = _proc_name(pid)
+        if not name:
+            return 0, None            # already dead - nothing to do
+        if name not in allowed:
+            return 0, (pid, name)     # foreign - leave it alone
+        _kill_pids([pid])
+        return 1, None
+
+    killed, skipped = 0, []
+    for pid in sorted(tracked):
+        k, s = _handle(pid, _TRACKED_PROC_NAMES)
+        killed += k
+        if s:
+            skipped.append(s)
+    for pid in sorted(listeners):
+        k, s = _handle(pid, _APP_PROC_NAMES)
+        killed += k
+        if s:
+            skipped.append(s)
+
+    for pid_path in (API_PID, WEB_PID):
+        try:
+            pid_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    print(f"Stopped {killed} process(es).")
+    if skipped:
+        shown = ", ".join(f"{pid} ({name})" for pid, name in skipped[:5])
+        more = f" +{len(skipped) - 5} more" if len(skipped) > 5 else ""
+        print(f"  [skip] left {len(skipped)} unrelated process(es) alone: "
+              f"{shown}{more}")
+
+
+def status(args):
+    for name, url in (("API", api_url(args.api_port)),
+                      ("Web", web_url(args.web_port))):
+        alive = http_ok(url)
+        state = "RUNNING" if alive else "down"
+        print(f"  {name:<4} :{args.web_port if name == 'Web' else args.api_port}  {state}")
+
+
+# ── entry point ──────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="app.start",
+        description="One-command launcher for Merchant Intelligence "
+                    "(FastAPI backend + Vite React frontend).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Examples:\n"
+               "  python app.start app\n"
+               "  python app.start app --rebuild     # rebuild ALL databases, then start\n"
+               "  python app.start rebuild           # rebuild ALL databases and exit\n"
+               "  python app.start app --open\n"
+               "  python app.start app --foreground\n"
+               "  python app.start app --no-web\n"
+               "  python app.start stop\n"
+               "  python app.start status")
+    parser.add_argument("command", nargs="?", default="app",
+                        choices=["app", "start", "rebuild", "stop", "status"],
+                        help="action to run (default: app)")
+    parser.add_argument("--rebuild", action="store_true",
+                        help="rebuild merchant_search.db + intelligence.db + "
+                             "merchant_intel.db from the Excel files, then run the "
+                             "self-improve alias-free gate, before starting")
+    parser.add_argument("--no-web", action="store_true",
+                        help="start the backend only")
+    parser.add_argument("--no-api", action="store_true",
+                        help="start the frontend only")
+    parser.add_argument("--api-port", type=int, default=8000)
+    parser.add_argument("--web-port", type=int, default=5173)
+    parser.add_argument("--timeout", type=int, default=60)
+    parser.add_argument("--open", action="store_true",
+                        help="auto-open the browser once services are healthy")
+    parser.add_argument("--foreground", "--log-follow", dest="foreground",
+                        action="store_true",
+                        help="stream both services' logs to the console "
+                             "in real time ([API] / [WEB] prefixes)")
+    args = parser.parse_args()
+
+    if args.command in ("app", "start"):
+        launch(args)
+    elif args.command == "rebuild":
+        # Standalone rebuild: rebuild BOTH databases + run the self-improve
+        # gate and exit (does NOT start the services - use
+        # `app.start app --rebuild` to rebuild + launch).
+        sys.exit(0 if rebuild_databases() else 1)
+    elif args.command == "stop":
+        stop(args)
+    elif args.command == "status":
+        status(args)
+
+
+if __name__ == "__main__":
+    main()
