@@ -685,6 +685,12 @@ def _synthesize_requirements(task: Dict[str, Any],
                 "resolved_internally": [],
                 "produces": list((INTENT_GRAPH.get(producer) or {})
                                   .get("produces", [])),
+                # Internal plumbing, not a user-requested intent: it must
+                # run (and show in workflow_executed) but never leak into
+                # the merged result's intent label. A name-only "static
+                # account + tid" request stays static_account+tid even
+                # though resolve_mxcode ran first.
+                "synthesized": True,
             })
             inserted.add(req)
         expanded.append(s)
@@ -748,6 +754,13 @@ def execute_workflow(conn, task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
     ordered = _topo_order(steps)
     intents = [s.get("intent") or "resolve" for s in ordered]
+    # The merged table's intent label reflects the USER-REQUESTED intents
+    # only — synthesized resolve steps (internal plumbing) never join it,
+    # so a name-only static_account+tid request doesn't read as
+    # mxcode+static_account+tid. workflow_executed still records them.
+    label_intents = [s.get("intent") or "resolve"
+                     for s in ordered if not s.get("synthesized")] \
+        or intents
     scope = _clause_scope(task, task.get("clauses") or [])
     # Only scope when EVERY attached clause intent is actually run — if a
     # clause's intent was dropped from the intents list (static_account
@@ -781,7 +794,7 @@ def execute_workflow(conn, task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         ran.append(step.get("step"))
         produced[step.get("step")] = extract_produced_values(
             table, step.get("produces") or [])
-    merged = _merge_tables(tables, intents)
+    merged = _merge_tables(tables, label_intents)
     merged["workflow_executed"] = [s.get("step") for s in ordered]
     merged["workflow_chain"] = chain
     return merged

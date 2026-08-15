@@ -467,6 +467,16 @@ def apply_pattern(ngram: str, intent: str, weight: Optional[int] = None) -> Opti
     except OSError as exc:
         logger.warning("failed to save pattern suggestion: %s", exc)
         return None
+    # Lockstep: the config file is only one half of the story — the [4h]
+    # parity test in tests/test_tasks.py asserts INTENT_PATTERNS ==
+    # _DEFAULT_INTENT_PATTERNS, and vocab.py's defaults must track the
+    # config or the suite (and any fresh-clone parity check) drifts. The
+    # Tier-1 enrichment module owns this regeneration (design doc §4).
+    try:
+        from .tasks import enrichment
+        enrichment.regenerate_vocab_defaults()
+    except Exception as exc:  # noqa: BLE001 — never fail the accept on sync
+        logger.warning("vocab.py lockstep regeneration failed: %s", exc)
     return new_spec
 
 

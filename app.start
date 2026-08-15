@@ -263,6 +263,19 @@ def preflight(args):
             print("  [..] tier-2 encoder: hashing fallback active "
                   "(optional — python scripts/export_embedding_model.py)")
 
+        # Tier-1 WordNet enrichment (optional — the propose stage degrades to
+        # a clear message without it). Informational, never blocks startup.
+        wn = subprocess.run(
+            [str(VENV_PY), "-c",
+             "from merchant_intelligence.tasks.enrichment import wordnet_status; "
+             "s = wordnet_status(); print(s['nltk'] and s['wordnet'])"],
+            capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+        if (wn.stdout or "").strip() == "True":
+            print("  [OK] tier-1 enrichment: nltk + wordnet corpus present")
+        else:
+            print("  [..] tier-1 enrichment: wordnet unavailable "
+                  "(optional — pip install nltk + download wordnet)")
+
     if not args.no_web:
         if not (WEB_DIR / "node_modules").exists():
             print("  [X] web deps missing - run: cd web && npm install")

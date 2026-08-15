@@ -115,6 +115,11 @@ export default function RuleEnginePage() {
   const [modeDraft, setModeDraft] = useState('off')
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [settingsMsg, setSettingsMsg] = useState(null)
+  // Tier 1 enrichment — WordNet synonym proposals (propose -> curate -> apply)
+  const [syn, setSyn] = useState(null)
+  const [synLoading, setSynLoading] = useState(false)
+  const [synMsg, setSynMsg] = useState(null)
+  const [synSel, setSynSel] = useState(new Set())
 
   useEffect(() => {
     api
@@ -150,6 +155,10 @@ export default function RuleEnginePage() {
         setSettingsDraft(th?.value != null ? String(th.value) : '')
         setModeDraft(d.settings?.semantic_tier_mode?.value ?? 'off')
       })
+      .catch(() => { /* non-critical */ })
+    api
+      .synonyms()
+      .then(setSyn)
       .catch(() => { /* non-critical */ })
   }, [])
 
@@ -221,6 +230,84 @@ export default function RuleEnginePage() {
       setCalMsg({ kind: 'success', text: `Forgot “${key}” — the next similar request will ask again.` })
     } catch (e) {
       setCalMsg({ kind: 'error', text: String(e.message || e) })
+    }
+  }
+
+  // ── Tier 1 enrichment: WordNet synonym proposals ────────────────────
+  async function refreshSyn() {
+    setSynLoading(true)
+    setSynMsg(null)
+    try {
+      setSyn(await api.synonyms())
+      setSynMsg({ kind: 'success', text: 'Proposals refreshed.' })
+    } catch (e) {
+      setSynMsg({ kind: 'error', text: String(e.message || e) })
+    } finally {
+      setSynLoading(false)
+    }
+  }
+
+  async function generateSyn() {
+    if (!window.confirm('Re-run WordNet expansion? Existing approvals and rejections are kept.')) return
+    setSynLoading(true)
+    setSynMsg(null)
+    try {
+      const d = await api.synonymsPropose()
+      setSyn(await api.synonyms())
+      setSynMsg({ kind: 'success', text: `Added ${d.added} new proposal(s) — ${d.total} total.` })
+    } catch (e) {
+      setSynMsg({ kind: 'error', text: String(e.message || e) })
+    } finally {
+      setSynLoading(false)
+    }
+  }
+
+  function toggleSynSel(id) {
+    setSynSel((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function markSyn(status) {
+    if (!synSel.size) return
+    const n = synSel.size
+    setSynLoading(true)
+    setSynMsg(null)
+    try {
+      await api.synonymsStatus([...synSel], status)
+      setSynSel(new Set())
+      setSyn(await api.synonyms())
+      setSynMsg({
+        kind: 'success',
+        text: `${status === 'approved' ? 'Approved' : 'Rejected'} ${n} candidate(s).`,
+      })
+    } catch (e) {
+      setSynMsg({ kind: 'error', text: String(e.message || e) })
+    } finally {
+      setSynLoading(false)
+    }
+  }
+
+  async function applySyn() {
+    if (!window.confirm('Merge approved synonym patterns into intents.json? This regenerates vocab.py defaults in lockstep and hot-reloads the engine.')) return
+    setSynLoading(true)
+    setSynMsg(null)
+    try {
+      const d = await api.synonymsApply(null)
+      setSyn(await api.synonyms())
+      setSynMsg({
+        kind: d.applied?.length ? 'success' : 'info',
+        text: d.applied?.length
+          ? `Applied ${d.applied.length} pattern(s) — engine hot-reloaded.`
+          : `Nothing applied${d.skipped?.length ? ` (${d.skipped.length} skipped: ${d.skipped[0].reason})` : ''}.`,
+      })
+    } catch (e) {
+      setSynMsg({ kind: 'error', text: String(e.message || e) })
+    } finally {
+      setSynLoading(false)
     }
   }
 
@@ -300,6 +387,16 @@ export default function RuleEnginePage() {
       (n) => !q || n.includes(q) || labelFor(n).toLowerCase().includes(q),
     )
   }, [cfg, filter])
+
+  // WordNet proposals grouped by intent for the curation panel.
+  const synGroups = useMemo(() => {
+    if (!syn?.candidates) return []
+    const map = {}
+    for (const c of syn.candidates) {
+      ;(map[c.intent] ||= []).push(c)
+    }
+    return Object.entries(map)
+  }, [syn])
 
   function selectIntent(key) {
     if (!cfg || !cfg.intents[key]) return
@@ -1375,6 +1472,151 @@ export default function RuleEnginePage() {
             </div>
           </div>
 
+          {/* ── Tier 1 enrichment — WordNet synonym proposals ── */}
+          <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-outline-variant bg-surface-container-low px-5 py-3.5">
+              <h3 className="flex items-center gap-2 text-sm font-bold text-on-surface">
+                <span className="msi text-[18px] text-primary">auto_awesome</span>
+                Tier 1 enrichment — WordNet synonyms
+              </h3>
+              <span className="font-plex text-[10px] font-bold uppercase tracking-wider text-outline">
+                build-time · data/exemplar_candidates.json
+              </span>
+            </div>
+            <div className="p-5">
+              {!syn ? (
+                <p className="py-2 text-center font-plex text-[12px] text-on-surface-variant">
+                  Loading synonym proposals…
+                </p>
+              ) : (
+                <div className="space-y-5">
+                  {/* Status row */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="rounded-full bg-surface-container-high px-3 py-1 font-plex text-[11px] font-bold text-on-surface-variant">
+                      {syn.count || 0} proposals
+                    </span>
+                    <span className="rounded-full bg-amber-50 px-3 py-1 font-plex text-[11px] font-bold text-amber-800">
+                      {syn.by_status?.pending || 0} pending
+                    </span>
+                    <span className="rounded-full bg-green-100 px-3 py-1 font-plex text-[11px] font-bold text-green-800">
+                      {syn.by_status?.approved || 0} approved
+                    </span>
+                    <span className="rounded-full bg-blue-100 px-3 py-1 font-plex text-[11px] font-bold text-blue-800">
+                      {syn.by_status?.applied || 0} applied
+                    </span>
+                    {syn.wordnet && !(syn.wordnet.nltk && syn.wordnet.wordnet) && (
+                      <span
+                        className="rounded-full bg-error-container px-3 py-1 font-plex text-[11px] font-bold text-error"
+                        title={syn.wordnet.hint}
+                      >
+                        wordnet unavailable
+                      </span>
+                    )}
+                    <button
+                      onClick={refreshSyn}
+                      disabled={synLoading}
+                      className="ml-auto flex items-center gap-1.5 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 font-plex text-[11px] font-bold text-on-surface-variant transition-all hover:border-primary hover:text-primary active:scale-95 disabled:opacity-40"
+                    >
+                      <span className="msi text-[15px]">{synLoading ? 'hourglass_top' : 'refresh'}</span>
+                      Refresh
+                    </button>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={generateSyn}
+                      disabled={synLoading}
+                      className="flex items-center gap-1.5 rounded-lg border border-outline-variant bg-surface-container-lowest px-3.5 py-2 font-plex text-[11px] font-bold text-on-surface-variant transition-all hover:border-primary hover:text-primary active:scale-95 disabled:opacity-40"
+                    >
+                      <span className="msi text-[16px]">auto_awesome</span>
+                      Generate proposals
+                    </button>
+                    <button
+                      onClick={() => markSyn('approved')}
+                      disabled={synLoading || !synSel.size}
+                      className="flex items-center gap-1.5 rounded-lg border border-secondary/40 bg-secondary-container/30 px-3.5 py-2 font-plex text-[11px] font-bold text-on-secondary-container transition-all hover:bg-secondary-container/60 active:scale-95 disabled:opacity-40"
+                    >
+                      <span className="msi text-[16px]">check</span>
+                      Approve selected ({synSel.size})
+                    </button>
+                    <button
+                      onClick={() => markSyn('rejected')}
+                      disabled={synLoading || !synSel.size}
+                      className="flex items-center gap-1.5 rounded-lg border border-error/30 bg-error-container/20 px-3.5 py-2 font-plex text-[11px] font-bold text-error transition-all hover:bg-error-container/40 active:scale-95 disabled:opacity-40"
+                    >
+                      <span className="msi text-[16px]">close</span>
+                      Reject selected
+                    </button>
+                    <button
+                      onClick={applySyn}
+                      disabled={synLoading || !(syn.by_status?.approved)}
+                      className="flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 font-plex text-[11px] font-bold text-on-primary shadow-sm transition-all hover:opacity-90 active:scale-95 disabled:opacity-40"
+                    >
+                      <span className="msi text-[16px]">merge</span>
+                      Apply approved
+                    </button>
+                  </div>
+
+                  {/* Candidate list grouped by intent */}
+                  {synGroups.length > 0 ? (
+                    <div className="space-y-3">
+                      <p className="font-plex text-[10px] font-bold uppercase tracking-wider text-outline">
+                        WordNet-proposed synonym phrases for the regex tier — check the good ones, Approve, then Apply. Applied patterns join intents.json as weight-2 entries (lockstep-synced with the code defaults so the regression suite stays green).
+                      </p>
+                      {synGroups.map(([intent, cands]) => (
+                        <div key={intent} className="rounded-xl border border-outline-variant bg-surface-container-low p-4">
+                          <div className="mb-2 flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-[12px] font-bold text-primary">{intent}</span>
+                            <span className="font-plex text-[10px] text-on-surface-variant">{cands.length} candidate(s)</span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {cands.map((c) => {
+                              const disabled = c.status === 'applied' || c.status === 'rejected'
+                              return (
+                                <label
+                                  key={c.id}
+                                  className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-plex text-[11px] transition-all ${
+                                    disabled
+                                      ? 'border-outline-variant bg-surface-container-high/60 text-outline'
+                                      : synSel.has(c.id)
+                                        ? 'border-primary bg-primary/10 font-bold text-primary'
+                                        : 'border-outline-variant bg-surface-container-lowest text-on-surface-variant hover:border-primary'
+                                  }`}
+                                  title={`${c.phrase} — from “${c.source_phrase}” (${c.synonym})${c.conflict ? ` · ⚠ also a pattern for ${c.conflict_with.join(', ')}` : ''}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={synSel.has(c.id)}
+                                    disabled={disabled}
+                                    onChange={() => toggleSynSel(c.id)}
+                                    className="accent-primary"
+                                  />
+                                  <span>“{c.phrase}”</span>
+                                  {c.status === 'applied' && <span className="text-[9px] font-bold text-blue-600">applied</span>}
+                                  {c.status === 'rejected' && <span className="text-[9px] font-bold text-error">rejected</span>}
+                                  {c.conflict && <span className="text-[11px] text-error">⚠</span>}
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-outline-variant px-4 py-8 text-center">
+                      <p className="font-plex text-[12px] text-on-surface-variant">
+                        No proposals yet — click <b>Generate proposals</b> to WordNet-expand the current
+                        patterns into candidate synonym phrases, then approve the ones that fit your
+                        operations language.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* ── Learning — pattern suggestions ── */}
           <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-outline-variant bg-surface-container-low px-5 py-3.5">
@@ -1525,6 +1767,19 @@ export default function RuleEnginePage() {
           }`}
         >
           {sugMsg.text}
+        </div>
+      )}
+      {synMsg && (
+        <div
+          className={`rounded-xl border px-5 py-3 font-plex text-[13px] font-semibold ${
+            synMsg.kind === 'error'
+              ? 'border-error/20 bg-error-container/30 text-error'
+              : synMsg.kind === 'success'
+                ? 'border-secondary/20 bg-secondary-container/30 text-on-secondary-container'
+                : 'border-outline-variant bg-surface-container-low text-on-surface-variant'
+          }`}
+        >
+          {synMsg.text}
         </div>
       )}
     </div>

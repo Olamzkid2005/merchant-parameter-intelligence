@@ -159,6 +159,20 @@ export const api = {
     if (!res.ok) throw new Error('Failed to load pattern suggestions')
     return res.json()
   },
+  synonyms: async () => {
+    const res = await fetch(`${BASE}/synonyms`)
+    if (!res.ok) throw new Error('Failed to load synonym proposals')
+    return res.json()
+  },
+  synonymsPropose: () => post('/synonyms/propose', {}),
+  synonymsStatus: (ids, status) => post('/synonyms/status', { ids, status }),
+  synonymsApply: (ids) => post('/synonyms/apply', { ids: ids || null }),
+  synonymsManifest: async () => {
+    const res = await fetch(`${BASE}/synonyms/manifest`)
+    if (!res.ok) throw new Error('Failed to load synonym manifest')
+    return res.json()
+  },
+  },
   applySuggestion: (ngram, intent, weight) =>
     post('/feedback/suggestions/apply', { ngram, intent, weight }),
   rejectSuggestion: (ngram, intent) =>

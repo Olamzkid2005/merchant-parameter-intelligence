@@ -372,6 +372,7 @@ python tests/test_new_features.py     # API feature smoke tests
 python tests/test_next_level.py       # LLM brief + self-improve harness
 python tests/test_semantic_shadow.py  # Tier-2 semantic layer (offline, shadow mode)
 python tests/test_intent_golden.py    # golden-set novelty contract (offline)
+python tests/test_enrichment.py       # Tier-1 WordNet enrichment pipeline (hermetic: fake synsets + temp config)
 python tests/test_app_start.py        # launcher pre-flight
 python tests/test_watch_mode.py       # --watch rebuild flag
 python tests/test_foreground_mode.py  # --log-follow mode

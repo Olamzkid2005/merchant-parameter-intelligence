@@ -1077,6 +1077,66 @@ def suggestion_reject(req: SuggestionAction):
     return {"ok": True}
 
 
+class SynonymStatusRequest(BaseModel):
+    ids: List[str] = []
+    status: str = "approved"  # "approved" | "rejected"
+
+
+class SynonymApplyRequest(BaseModel):
+    ids: Optional[List[str]] = None  # None = apply all approved
+
+
+@app.get("/api/synonyms")
+def get_synonym_candidates():
+    """Tier-1 WordNet proposals (design doc §4): pending/approved/rejected
+    candidate phrases grouped for curation on the Rule Engine page.
+    """
+    from merchant_intelligence.tasks import enrichment
+    return enrichment.candidates()
+
+
+@app.post("/api/synonyms/propose")
+def propose_synonyms():
+    """Re-run the WordNet proposal stage (idempotent — statuses preserved).
+    400 with an install hint when nltk/wordnet is unavailable."""
+    from merchant_intelligence.tasks import enrichment
+    r = enrichment.propose_candidates()
+    if not r.get("ok"):
+        hint = (r.get("wordnet") or {}).get("hint")
+        raise HTTPException(
+            status_code=400,
+            detail=(r.get("reason") or "proposal failed")
+                   + (f" — {hint}" if hint else ""))
+    return r
+
+
+@app.post("/api/synonyms/status")
+def synonym_status(req: SynonymStatusRequest):
+    """The curation gate: mark candidate ids approved or rejected."""
+    from merchant_intelligence.tasks import enrichment
+    r = enrichment.set_status(req.ids, req.status)
+    if not r.get("ok"):
+        raise HTTPException(status_code=400,
+                            detail=r.get("reason", "bad request"))
+    return r
+
+
+@app.post("/api/synonyms/apply")
+def apply_synonyms(req: SynonymApplyRequest):
+    """Merge approved candidates into intents.json (weight-2 patterns),
+    regenerating vocab.py's defaults in lockstep, appending the phrases to
+    the Tier-2 exemplars and recording provenance. Hot-reloaded."""
+    from merchant_intelligence.tasks import enrichment
+    return enrichment.apply_approved(req.ids)
+
+
+@app.get("/api/synonyms/manifest")
+def synonym_manifest():
+    """Provenance of every applied auto-pattern (data/auto_pattern_manifest.json)."""
+    from merchant_intelligence.tasks import enrichment
+    return enrichment.manifest()
+
+
 @app.post("/api/task/analyze")
 def task_analyze(req: TaskRequest):
     """Intent-parser debug endpoint (v2): explain WHY a request was routed
