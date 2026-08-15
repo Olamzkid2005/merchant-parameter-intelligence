@@ -412,8 +412,16 @@ column check) — a rebuild that regresses any of these fails loudly.
 - **`data/`, `*.xlsx`, DBs, `.venv/`, `logs/`, `web/node_modules/` are
   gitignored** — source data and DBs never enter version control. Never
   commit real merchant emails/phones (commit `cebba65` scrubbed them).
-- The shell in this environment lacks `grep`/`tail`/`sleep` on Windows — use
-  Python one-liners (`.venv/Scripts/python.exe -c …`) for text processing.
+- **CLI tools installed per-user via Scoop** (`~/scoop/shims`, i.e.
+  `C:\Users\<user>\scoop\shims`): `grep` (GNU 3.11), `rg`/ripgrep (15.2.0),
+  `sed` (GNU 4.9), `awk`/`gawk` (GNU Awk 5.4.1), and GNU `coreutils`
+  (`tail`, `head`, `wc`, `ls`, `cat`, `sort`, `uniq`, `sleep`, `cut`, …).
+  Scoop added the shims dir to the Windows user PATH, **but a freshly
+  spawned shell may not inherit the updated PATH** — if a tool reports
+  `command not found`, prefix it with
+  `export PATH="$HOME/scoop/shims:$PATH"`. (Python one-liners remain the
+  reliable fallback, and the `code_search` tool's vendored ripgrep is still
+  missing on this machine.)
 - `logs/` holds runtime logs + PID files; `data/build_progress.txt` shows
   live rebuild progress.
 
