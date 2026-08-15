@@ -29,10 +29,13 @@ from .parser import (
     extract_reference, extract_segment, key_merchant_matches,
     looks_like_address, parse_identifiers, parse_named_identifiers,
 )
-from .pipelines import _PIPELINES, _merge_tables, _pipeline_resolve
+from .pipelines import (
+    _PIPELINES, _merge_tables, _pipeline_resolve, extract_produced_values,
+)
 from .vocab import (
-    CHAINABLE, FIELD_NAME_STOPS, ID_KINDS, INTENT_KEYWORDS, MAX_INPUT_CHARS,
-    NAME_CAPABLE_INTENTS, NIGERIA_STATES, SEGMENT_EXTRA_STOP, _lower,
+    CHAINABLE, FIELD_NAME_STOPS, ID_KINDS, INTENT_GRAPH, INTENT_KEYWORDS,
+    MAX_INPUT_CHARS, NAME_CAPABLE_INTENTS, NIGERIA_STATES, SEGMENT_EXTRA_STOP,
+    WORKFLOW_STEPS, _lower,
 )
 
 logger = logging.getLogger(__name__)
@@ -583,13 +586,216 @@ def _clause_scope(task: Dict[str, Any],
     return {c["intent"]: c.get("identifiers", {}) for c in clauses}
 
 
+# ── Workflow execution (feature: execute the dependency-aware plan) ────────
+# build_execution_plan() describes the plan (the UI renders the step verbs);
+# execute_workflow() runs it: steps execute in dependency order and a step
+# whose `requires` names an earlier step consumes that step's produced
+# identifier values. A declared requirement whose step is NOT in the plan is
+# either satisfied internally by the pipeline itself (static_account resolves
+# TIDs/MX to MX codes) or synthesized as a resolve step — a name-only
+# "static account for LAGOON WATERS" genuinely runs resolve_mxcode ->
+# fetch_static_account, feeding the produced MX codes forward.
+
+# Step verb -> the intent that produces it (inverse of WORKFLOW_STEPS).
+_STEP_VERB_INTENT = {v: k for k, v in WORKFLOW_STEPS.items()}
+
+# Requirements each pipeline satisfies from its OWN identifiers — never
+# synthesized and never injected (the pipeline resolves them internally).
+_REQ_SATISFIED_INTERNALLY = {
+    "static_account": {
+        "resolve_mxcode": {"tid", "mxcode", "static", "account"},
+    },
+}
+
+
+def _plan_steps(task: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return list((task.get("workflow") or {}).get("steps") or [])
+
+
+def _topo_order(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Stable dependency order: a step runs only after every step it requires
+    (by step verb) that is present in the plan. Edges naming an absent step
+    are handled by _synthesize_requirements before this runs."""
+    by_verb = {s.get("step"): s for s in steps}
+    ordered: List[Dict[str, Any]] = []
+    done: set = set()
+    pending = list(steps)
+    while pending:
+        progressed = False
+        remaining: List[Dict[str, Any]] = []
+        for s in pending:
+            reqs = [r for r in (s.get("requires") or []) if r in by_verb]
+            if all(r in done for r in reqs):
+                ordered.append(s)
+                done.add(s.get("step"))
+                progressed = True
+            else:
+                remaining.append(s)
+        if not progressed:
+            # Cycle or orphaned edge — run the rest in declared order.
+            ordered.extend(remaining)
+            break
+        pending = remaining
+    return ordered
+
+
+def _synthesize_requirements(task: Dict[str, Any],
+                             steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Insert missing requirement steps so every declared `requires` is
+    satisfied by an actual run.
+
+    A requirement whose step is absent from the plan is either satisfied
+    internally (the pipeline resolves the value itself — see
+    _REQ_SATISFIED_INTERNALLY) or needs a resolve step to produce it. The
+    latter is synthesized (name-only requests: "static account for LAGOON
+    WATERS" gains a resolve_mxcode step before fetch_static_account).
+    Returns the expanded step list; each synthesized step runs once even when
+    several steps depend on it.
+    """
+    have = {s.get("step") for s in steps}
+    idents = task.get("identifiers") or {}
+    expanded: List[Dict[str, Any]] = []
+    inserted: set = set()
+    for s in steps:
+        needs = []
+        for req in s.get("requires") or []:
+            if req in have or req in inserted:
+                continue
+            internal_kinds = (_REQ_SATISFIED_INTERNALLY.get(s.get("intent"), {})
+                              .get(req))
+            if internal_kinds and any(idents.get(k) for k in internal_kinds):
+                # The pipeline satisfies the requirement from its own input
+                # (TIDs/MX/accounts given) — nothing to synthesize.
+                continue
+            if not (task.get("names") or any(idents.values())):
+                # Nothing that could feed the requirement (a bare template
+                # with no merchant) — leave it unmet so the pipeline's own
+                # "no merchant found" message surfaces.
+                continue
+            producer = _STEP_VERB_INTENT.get(req)
+            if producer is None:
+                continue  # unknown verb — leave the requirement unmet
+            needs.append((req, producer))
+        for req, producer in needs:
+            expanded.append({
+                "intent": producer,
+                "step": req,
+                "requires": [],
+                "resolved_internally": [],
+                "produces": list((INTENT_GRAPH.get(producer) or {})
+                                  .get("produces", [])),
+            })
+            inserted.add(req)
+        expanded.append(s)
+    return expanded
+
+
+def _inject_produced(task: Dict[str, Any],
+                     produced: Dict[str, Dict[str, Any]],
+                     step: Dict[str, Any],
+                     ran: List[str]) -> Optional[Dict[str, Any]]:
+    """Give a step the values upstream steps produced for it.
+
+    Only explicit `requires` edges trigger injection, so a compound that asks
+    for unrelated fields (email + phone) is unaffected — each step keeps the
+    original identifiers, exactly as before. Returns a shallow-copied task
+    with the produced values merged in, or None when nothing applies.
+    """
+    reqs = [r for r in (step.get("requires") or []) if r in ran]
+    if not reqs:
+        return None
+    ids = {k: list(v) for k, v in (task.get("identifiers") or {}).items()}
+    names = list(task.get("names") or [])
+    chained: List[str] = []
+    added = 0
+    for up in reqs:
+        vals = produced.get(up) or {}
+        for kind, values in (vals.get("identifiers") or {}).items():
+            existing = {v.upper() for v in ids.get(kind, [])}
+            fresh = [v for v in values if v.upper() not in existing]
+            if fresh:
+                ids.setdefault(kind, []).extend(fresh)
+                added += len(fresh)
+                chained.append(up)
+        for n in vals.get("names") or []:
+            if n.upper() not in {x.upper() for x in names}:
+                names.append(n)
+                added += 1
+                chained.append(up)
+    if not added:
+        return None
+    scoped = dict(task)
+    scoped["identifiers"] = ids
+    scoped["names"] = names
+    scoped["identifier_count"] = task.get("identifier_count", 0) + added
+    scoped["_chained_from"] = list(dict.fromkeys(chained))
+    return scoped
+
+
+def execute_workflow(conn, task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Run the task's dependency-aware plan and merge the step tables.
+
+    Returns a render-ready table (same shape as the legacy merge) with the
+    execution trace attached: `workflow_executed` (step verbs in run order,
+    including synthesized resolve steps) and `workflow_chain` (step verb ->
+    {"from": upstream steps, "values": n} for every step that consumed
+    upstream produced identifiers). Returns None when the task carries no
+    plan — the caller falls back to the legacy intent loop.
+    """
+    steps = _synthesize_requirements(task, _plan_steps(task))
+    if not steps:
+        return None
+    ordered = _topo_order(steps)
+    intents = [s.get("intent") or "resolve" for s in ordered]
+    scope = _clause_scope(task, task.get("clauses") or [])
+    # Only scope when EVERY attached clause intent is actually run — if a
+    # clause's intent was dropped from the intents list (static_account
+    # subsumes mxcode: 'get mxcode for A and static account for B'), its
+    # identifiers would vanish from the output. Fall back to the full set
+    # so no identifier ever disappears.
+    if scope and not set(scope).issubset(intents):
+        scope = None
+    tables: List[Dict[str, Any]] = []
+    produced: Dict[str, Dict[str, Any]] = {}
+    chain: Dict[str, Any] = {}
+    ran: List[str] = []
+    for step in ordered:
+        intent = step.get("intent") or "resolve"
+        scoped_task = task
+        if scope and intent in scope:
+            scoped_task = dict(task)
+            scoped_task["identifiers"] = scope[intent]
+        injected = _inject_produced(scoped_task, produced, step, ran)
+        if injected is not None:
+            scoped_task = injected
+            chain[step.get("step")] = {
+                "from": list(dict.fromkeys(
+                    injected.get("_chained_from") or [])),
+                "values": injected["identifier_count"]
+                           - task.get("identifier_count", 0),
+            }
+        pipeline = _PIPELINES.get(intent, _pipeline_resolve)
+        table = pipeline(conn, scoped_task)
+        tables.append(table)
+        ran.append(step.get("step"))
+        produced[step.get("step")] = extract_produced_values(
+            table, step.get("produces") or [])
+    merged = _merge_tables(tables, intents)
+    merged["workflow_executed"] = [s.get("step") for s in ordered]
+    merged["workflow_chain"] = chain
+    return merged
+
+
 def execute_task(task: Dict[str, Any]) -> Dict[str, Any]:
     """Run the task pipeline(s) and return a render-ready result table.
 
-    Compound requests ("get MX codes AND emails") run each intent pipeline and
-    merge the tables into one (feature #4). Clause attachments scope each
-    pipeline to its own identifier ('email for A and phone for B'). Next-step
-    suggestions ride along (feature #10).
+    The task's dependency-aware workflow plan (TaskDescriptor.workflow) is
+    executed step by step (execute_workflow): steps run in dependency order
+    and produced identifiers are threaded into dependent steps. Tasks without
+    a plan fall back to the legacy loop — each intent pipeline runs with the
+    same identifiers and the tables merge into one (feature #4). Clause
+    attachments scope each pipeline to its own identifier ('email for A and
+    phone for B'). Next-step suggestions ride along (feature #10).
     """
     intents = task.get("intents") or [task.get("intent", "resolve")]
     t0 = time.perf_counter()
@@ -603,23 +809,30 @@ def execute_task(task: Dict[str, Any]) -> Dict[str, Any]:
             error="intelligence.db not found",
         ).to_dict()
     try:
-        tables = []
-        scope = _clause_scope(task, task.get("clauses") or [])
-        # Only scope when EVERY attached clause intent is actually run — if a
-        # clause's intent was dropped from the intents list (static_account
-        # subsumes mxcode: 'get mxcode for A and static account for B'), its
-        # identifiers would vanish from the output. Fall back to the full set
-        # so no identifier ever disappears.
-        if scope and not set(scope).issubset(intents):
-            scope = None
-        for intent in intents:
-            pipeline = _PIPELINES.get(intent, _pipeline_resolve)
-            scoped_task = task
-            if scope and intent in scope:
-                scoped_task = dict(task)
-                scoped_task["identifiers"] = scope[intent]
-            tables.append(pipeline(conn, scoped_task))
-        result = PipelineResult.from_dict(_merge_tables(tables, intents))
+        result = execute_workflow(conn, task)
+        if result is None:
+            # Legacy path: the task carries no plan (hand-built descriptor)
+            # — run the intent list directly, exactly as before.
+            scope = _clause_scope(task, task.get("clauses") or [])
+            # Only scope when EVERY attached clause intent is actually run —
+            # if a clause's intent was dropped from the intents list
+            # (static_account subsumes mxcode), its identifiers would vanish
+            # from the output. Fall back to the full set so no identifier
+            # ever disappears.
+            if scope and not set(scope).issubset(intents):
+                scope = None
+            tables = []
+            for intent in intents:
+                pipeline = _PIPELINES.get(intent, _pipeline_resolve)
+                scoped_task = task
+                if scope and intent in scope:
+                    scoped_task = dict(task)
+                    scoped_task["identifiers"] = scope[intent]
+                tables.append(pipeline(conn, scoped_task))
+            result = _merge_tables(tables, intents)
+            result["workflow_executed"] = []
+            result["workflow_chain"] = {}
+        result = PipelineResult.from_dict(result)
         result.intents = intents
         result.suggestions = suggest_next_steps(task, result.to_dict())
         result.llm_refined = bool(task.get("llm_refined"))

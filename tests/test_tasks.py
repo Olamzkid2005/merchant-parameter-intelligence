@@ -1148,6 +1148,45 @@ check("static acc no resolves to a row", len(res4["rows"]) >= 1, f"{len(res4['ro
 if res4["rows"]:
     check("static acc row has merchant", bool(res4["rows"][0].get("merchant")))
 
+# ── Workflow execution: the dependency-aware plan actually runs ──────────
+print("\n[4a] execute_task runs the dependency-aware workflow")
+# Name-only static account: the plan declares resolve_mxcode ->
+# fetch_static_account; the executor synthesizes the resolve step and feeds
+# the produced MX codes into the static-account step.
+w1 = detect_task("get the static account for LAGOON WATERS")
+check("name-only static account detected", w1 is not None
+      and w1.get("intent") == "static_account",
+      repr(w1 and w1.get("intent")))
+rw1 = execute_task(w1)
+check("workflow ran with synthesized resolve step",
+      rw1.get("workflow_executed") == ["resolve_mxcode", "fetch_static_account"],
+      repr(rw1.get("workflow_executed")))
+check("produced mxcodes threaded into the dependent step",
+      bool(rw1.get("workflow_chain", {}).get("fetch_static_account")),
+      repr(rw1.get("workflow_chain")))
+check("chained rows carry MX codes", bool(rw1["rows"])
+      and all((r.get("mxcode") or "").startswith("MX")
+              for r in rw1["rows"] if r.get("mxcode")),
+      f"{len(rw1['rows'])} rows")
+# Identifier-only static account: the pipeline resolves the MX requirement
+# internally, so no resolve step is synthesized and the run is unchanged.
+rw2 = execute_task(detect_task("get the static account for MX183544"))
+check("identifier-only plan runs its one step",
+      rw2.get("workflow_executed") == ["fetch_static_account"],
+      repr(rw2.get("workflow_executed")))
+check("identifier-only plan threads nothing",
+      rw2.get("workflow_chain") == {}, repr(rw2.get("workflow_chain")))
+# No-edge compound (mxcode + email): both steps run, nothing is threaded.
+w3 = detect_task("2103O338\nMX184380\nget the mx codes and emails for these")
+rw3 = execute_task(w3)
+check("no-edge compound runs both plan steps",
+      set(rw3.get("workflow_executed")) == {"resolve_mxcode", "fetch_email"},
+      repr(rw3.get("workflow_executed")))
+check("no-edge compound threads nothing",
+      rw3.get("workflow_chain") == {}, repr(rw3.get("workflow_chain")))
+check("no-edge compound merged rows", len(rw3["rows"]) >= 1,
+      f"{len(rw3['rows'])} rows")
+
 # ── Segment / collection intents (feature: "all the addresses of all nnpc")
 print("\n[4b] segment intent (collection requests)")
 seg = detect_task("get me all the addresses of all nnpc stations")

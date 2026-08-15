@@ -1509,6 +1509,55 @@ _PIPELINES = {
 }
 
 
+# Produced registry fields -> the identifier kinds a later workflow step can
+# consume (resolve_any / the pipelines read these). 'name' values feed the
+# task's names list. Only fields that are genuinely identifier-like are
+# threaded — informational columns (address, bank, ...) never are.
+_PRODUCED_FIELD_KINDS = {
+    "mxcode": "mxcode",
+    "tid": "tid",
+    "phone": "phone",
+    "email": "email",
+    "static_acc_no": "static",
+    "account_number": "account",
+    "payable_code": "payable",
+    "alias": "alias",
+    "beneficiary": "name",
+    "merchant": "name",
+}
+
+
+def extract_produced_values(result: Dict[str, Any],
+                            produced_fields: List[str]) -> Dict[str, Any]:
+    """Pull the identifier-like values a pipeline's result rows PRODUCED.
+
+    Feeds the workflow executor: step P's rows produce values that step S
+    (whose `requires` names P) can consume as identifiers or names.
+    Returns {"identifiers": {kind: [values]}, "names": [names]} with
+    per-(kind, value) dedup.
+    """
+    out_ids: Dict[str, List[str]] = {}
+    names: List[str] = []
+    seen: set = set()
+    for field in produced_fields or []:
+        kind = _PRODUCED_FIELD_KINDS.get(field)
+        if kind is None:
+            continue
+        for r in result.get("rows", []):
+            v = r.get(field)
+            if not v:
+                continue
+            key = (kind, str(v).strip().upper())
+            if key in seen:
+                continue
+            seen.add(key)
+            if kind == "name":
+                names.append(str(v).strip())
+            else:
+                out_ids.setdefault(kind, []).append(str(v).strip())
+    return {"identifiers": out_ids, "names": names}
+
+
 def _merge_tables(tables: List[Dict[str, Any]], intents: List[str]) -> Dict[str, Any]:
     """Merge multiple intent tables into one (feature #4, compound intents).
 

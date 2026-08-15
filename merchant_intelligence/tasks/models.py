@@ -150,6 +150,10 @@ class PipelineResult:
     not_found  every input identifier/name that did not resolve, with a reason
     suggestions  one-click follow-up prompts (execute_task only)
     error      non-empty when the pipeline could not run (e.g. missing DB)
+    workflow_executed  step verbs actually run, in dependency order (incl.
+                  synthesized resolve steps) — the executed plan
+    workflow_chain  step verb -> {"from": upstream steps, "values": n} for
+                  every step that consumed upstream produced identifiers
     """
 
     intent: str = "resolve"
@@ -163,6 +167,8 @@ class PipelineResult:
     llm_refined: bool = False
     confidence: int = 0
     error: str = ""
+    workflow_executed: List[str] = field(default_factory=list)
+    workflow_chain: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -177,6 +183,8 @@ class PipelineResult:
             "llm_refined": self.llm_refined,
             "confidence": self.confidence,
             "error": self.error,
+            "workflow_executed": list(self.workflow_executed),
+            "workflow_chain": dict(self.workflow_chain),
         }
 
     @classmethod
@@ -193,4 +201,6 @@ class PipelineResult:
             llm_refined=data.get("llm_refined", False),
             confidence=data.get("confidence", 0),
             error=data.get("error", ""),
+            workflow_executed=list(data.get("workflow_executed", [])),
+            workflow_chain=dict(data.get("workflow_chain", {})),
         )
