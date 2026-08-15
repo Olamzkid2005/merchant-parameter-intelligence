@@ -54,6 +54,12 @@ def _restore_env(saved):
             os.environ[k] = v
 
 
+# Hermetic: test the deterministic pure-Python hashing encoder regardless
+# of whether an ONNX model artifact exists on this machine (the ONNX path is
+# covered separately by the baseline measurement + export probe).
+os.environ.setdefault("MERCHANT_TIER2_ENCODER", "hash")
+
+
 # ── [1] settings knob ─────────────────────────────────────────────────────
 print("\n[1] semantic_tier_mode knob")
 check("defaults to 'off'", engine_settings.semantic_tier_mode() == "off",

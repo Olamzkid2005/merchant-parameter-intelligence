@@ -22,10 +22,11 @@ Design (mirrors the doc's §3/§5/§6/§9/§11):
   - Encoders: HashingEncoder is the deterministic pure-Python fallback (word
     + character n-gram hashing, L2-normalised, cosine) so shadow mode runs on
     any machine with zero extra dependencies. The production path is an ONNX
-    export of a small sentence-transformer (all-MiniLM-L6-v2 / bge-small);
-    ONNXEncoder slots into the same `encode()` interface once
-    scripts/export_embedding_model.py ships the artifact. The encoder is a
-    config value, never hardcoded into resolve().
+    export of a small sentence-transformer (all-MiniLM-L6-v2 / bge-small):
+    ONNXEncoder loads the artifact produced by scripts/export_embedding_model.py
+    and falls back to hashing when the model or onnxruntime is missing. The
+    encoder is a config value (MERCHANT_TIER2_ENCODER), never hardcoded into
+    resolve().
   - Calibration (§6): cosine lives in a tight band; a piecewise-linear map
     (COS_FLOOR..COS_CEIL -> 0..100) puts Tier 2 on the same 0-100 scale as
     Tier 1 so the same threshold/margin gates apply. The mapping is a Phase-1
@@ -60,6 +61,9 @@ _CAL_A, _CAL_B = 0.30, 0.85   # piecewise-linear calibration bounds (cosine)
 _ENCODER_ID = "hash-ngram-v1"
 _DIM = 1024
 
+# Production encoder (design doc §9) — override via MERCHANT_TIER2_MODEL.
+_MODEL_ID = os.environ.get("MERCHANT_TIER2_MODEL", "all-MiniLM-L6-v2")
+
 # Identifier shapes masked before embedding (mirrors feedback._IDENTIFIER_RE:
 # TIDs, MX codes, phones, emails, account/BVN/MID numbers — they belong to the
 # merchant, never to the request's intent language).
@@ -69,6 +73,11 @@ _IDENTIFIER_RE = re.compile(
     r"2ISW[A-Z0-9]{4,}\b|ACCT\d+\b|STATIC\d+\b|MID\d+\b|BVN\d+\b)",
     re.IGNORECASE,
 )
+
+# mask_query placeholders: [MERCHANT], [MX], [TID], [ID], ... — identifiers
+# and merchant names carry no intent signal, so both encoders drop them
+# before embedding (kept as bracketed tokens in mask_query's public output).
+_STRIP_PLACEHOLDERS = re.compile(r"\[[A-Z_]+\]")
 
 # Function-word stoplist for the hashing tokenizer — request scaffolding, not
 # intent language. Intent-neutral and small on purpose: merchant tokens are
@@ -118,6 +127,11 @@ class HashingEncoder:
         return [self._vec(t) for t in texts]
 
     def _tokens(self, text: str) -> List[str]:
+        # mask_query placeholders ([MERCHANT], [MX], [ID]) are artifacts of
+        # identifier/name masking, not intent language — drop them so a
+        # merchant name can never leak a word (e.g. "merchant") into the
+        # vector.
+        text = _STRIP_PLACEHOLDERS.sub(" ", text)
         words = re.findall(r"[a-z0-9]+", _lower(text))
         return [w for w in words if len(w) >= 2 and w not in _STOP]
 
@@ -145,26 +159,92 @@ class HashingEncoder:
 
 
 class ONNXEncoder:
-    """Production encoder — loads an exported sentence-transformer model.
+    """Production encoder — ONNX export of a small sentence-transformer
+    (Phase-0 default all-MiniLM-L6-v2, design doc §9).
 
-    Not implemented yet: the ONNX artifact + tokenizer come from
-    scripts/export_embedding_model.py (Phase 0 deliverable, pending the
-    onnxruntime/nltk dependency install). Until the model exists, the module
-    uses HashingEncoder; this class documents the exact seam a real encoder
-    must fill (same `encode()` -> list of vectors contract).
+    Loads the artifact produced by scripts/export_embedding_model.py
+    (data/models/<model_id>/model.onnx + tokenizer.json) and runs it through
+    onnxruntime + the fast tokenizers library, mean-pooling the last hidden
+    state and L2-normalising — the standard sentence-transformer pooling, so
+    it fills the same `encode()` -> list of vectors contract as
+    HashingEncoder. _make_encoder() falls back to hashing when the artifact
+    or onnxruntime is unavailable, so the tier degrades gracefully on any
+    machine without the model.
     """
 
-    id = "onnx-minilm-v1"
+    def __init__(self, model_id: str = _MODEL_ID):
+        import onnxruntime as ort
+        from tokenizers import Tokenizer
+        d = config.DATA_DIR / "models" / model_id
+        self.model_id = model_id
+        self.id = f"onnx-{model_id}"
+        self._session = ort.InferenceSession(
+            str(d / "model.onnx"), providers=["CPUExecutionProvider"])
+        tok = Tokenizer.from_file(str(d / "tokenizer.json"))
+        tok.enable_truncation(max_length=256)
+        # Dynamic padding (no fixed length) — the batch pads to its own
+        # longest sentence, not to 256, so short exemplars stay cheap.
+        tok.enable_padding()
+        self._tok = tok
 
     def encode(self, texts: List[str]) -> List[Any]:
-        raise NotImplementedError(
-            "ONNX encoder needs the exported model (scripts/export_embedding_model.py); "
-            "HashingEncoder is the active fallback.")
+        import numpy as np
+        # Drop mask_query placeholder tokens ([MERCHANT], [MX], [ID]) so the
+        # embedding only ever sees true intent language (see HashingEncoder).
+        texts = [_STRIP_PLACEHOLDERS.sub(" ", t) for t in texts]
+        encs = self._tok.encode_batch(list(texts))
+        input_ids = np.array([e.ids for e in encs], dtype=np.int64)
+        attn = np.array([e.attention_mask for e in encs], dtype=np.int64)
+        feeds = {"input_ids": input_ids, "attention_mask": attn}
+        # sentence-transformers ONNX exports also take token_type_ids.
+        if hasattr(encs[0], "type_ids") and encs[0].type_ids:
+            feeds["token_type_ids"] = np.array(
+                [e.type_ids for e in encs], dtype=np.int64)
+        last_hidden = self._session.run(None, feeds)[0]
+        mask = attn[:, :, None].astype(np.float32)
+        vecs = (last_hidden * mask).sum(axis=1) / np.clip(
+            mask.sum(axis=1), 1e-9, None)
+        norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+        return [v / n for v, n in zip(vecs, np.clip(norms, 1e-9, None))]
+
+
+# Active encoder memoised per selection choice so the ONNX session is loaded
+# once per process, not per request (resolve() is lru_cached, but the cache
+# key needs the encoder id on every call). Tests flip MERCHANT_TIER2_ENCODER
+# between runs; each choice keeps its own memoised instance.
+_encoder_cache: Dict[str, Any] = {}
+_encoder_lock = threading.Lock()
+
+
+def _build_encoder(choice: str):
+    if choice == "hash":
+        return HashingEncoder()
+    try:
+        return ONNXEncoder()
+    except Exception as exc:
+        if choice == "onnx":
+            logger.warning(
+                "ONNX encoder unavailable (%s) — falling back to hashing", exc)
+        return HashingEncoder()
 
 
 def _make_encoder():
-    """Active encoder — the ONNX path once the model artifact exists."""
-    return HashingEncoder()
+    """Active encoder — env-selectable, ONNX when the artifact exists.
+
+    MERCHANT_TIER2_ENCODER=hash|onnx|auto (default auto): auto uses the ONNX
+    encoder when data/models/<model> + onnxruntime are present, else the
+    deterministic pure-Python HashingEncoder.
+    """
+    choice = os.environ.get("MERCHANT_TIER2_ENCODER", "auto") or "auto"
+    cached = _encoder_cache.get(choice)
+    if cached is not None:
+        return cached
+    with _encoder_lock:
+        cached = _encoder_cache.get(choice)
+        if cached is None:
+            cached = _build_encoder(choice)
+            _encoder_cache[choice] = cached
+    return cached
 
 
 # ── Exemplars ─────────────────────────────────────────────────────────────
@@ -224,7 +304,15 @@ def mask_query(text: str, task: Optional[Dict[str, Any]] = None) -> str:
 
 
 # ── Scoring ───────────────────────────────────────────────────────────────
-def _cosine(a: Dict[int, float], b: Dict[int, float]) -> float:
+def _cosine(a, b) -> float:
+    """Cosine between two vectors — dense ndarray (ONNX) or sparse dict
+    (hashing). Vectors are L2-normalised by their encoders, so this is a
+    dot product."""
+    if a is None or b is None:
+        return 0.0
+    if hasattr(a, "ndim"):
+        import numpy as np
+        return float(np.dot(a, b))
     if not a or not b:
         return 0.0
     dot = 0.0
@@ -233,6 +321,32 @@ def _cosine(a: Dict[int, float], b: Dict[int, float]) -> float:
         if w:
             dot += v * w
     return dot
+
+
+# Precomputed exemplar vectors per (fingerprint, encoder) — encoding ~190
+# exemplar phrases is the expensive part of a resolve (seconds for the ONNX
+# encoder); a module-level cache makes it a one-time cost per process and
+# per config change. Keyed on the exemplar fingerprint + encoder id so a
+# hot-reload or model swap rebuilds automatically.
+_exemplar_vecs: Dict[Tuple[str, str], Dict[str, List[Tuple[str, Any]]]] = {}
+_exemplar_vecs_lock = threading.Lock()
+
+
+def _get_exemplar_vecs(exemplars: Dict[str, List[str]], enc) \
+        -> Dict[str, List[Tuple[str, Any]]]:
+    key = (_fingerprint(exemplars), enc.id)
+    cached = _exemplar_vecs.get(key)
+    if cached is not None:
+        return cached
+    with _exemplar_vecs_lock:
+        cached = _exemplar_vecs.get(key)
+        if cached is None:
+            cached = {
+                intent: list(zip(phrases, enc.encode(phrases)))
+                for intent, phrases in exemplars.items()
+            }
+            _exemplar_vecs[key] = cached
+    return cached
 
 
 @lru_cache(maxsize=256)
@@ -250,9 +364,9 @@ def _rank_cached(masked: str, fingerprint: str, encoder_id: str
     qv = enc.encode([masked])[0]
     per_intent: Dict[str, Tuple[float, str]] = {}
     winner: Optional[Tuple[str, str, float]] = None  # (intent, exemplar, cos)
-    for intent, phrases in exemplars.items():
-        best_cos, best_ph = 0.0, phrases[0]
-        for ph, pv in zip(phrases, enc.encode(phrases)):
+    for intent, phrases in _get_exemplar_vecs(exemplars, enc).items():
+        best_cos, best_ph = 0.0, phrases[0][0]
+        for ph, pv in phrases:
             c = _cosine(qv, pv)
             if c > best_cos:
                 best_cos, best_ph = c, ph
