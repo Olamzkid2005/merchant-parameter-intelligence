@@ -18,6 +18,7 @@ change routing during this test.
 
 Run:  python tests/test_intent_golden.py
 """
+import json
 import os
 import sys
 from pathlib import Path
@@ -59,6 +60,33 @@ os.environ["SEMANTIC_TIER_MODE"] = "off"
 # check, which inspects matched patterns, does not apply to them.
 _INJECTED = {"segment"}
 VALID = set(INTENT_KEYWORDS) | _INJECTED
+
+# ── Routing regression snapshot ───────────────────────────────────────────
+# Committed next to the golden set: query -> how the CURRENT engine routes
+# it (routed | clarify | misroute | miss). The gate below asserts the live
+# behavior still matches — so an intent-pattern change that silently
+# re-routes a phrasing fails the suite with a per-query diff. Deliberate
+# routing changes (e.g. a real Tier 1 improvement) update the snapshot via
+# REBUILD_ROUTING_SNAPSHOT=1 after review.
+SNAPSHOT_FILE = (Path(__file__).resolve().parent.parent
+                 / "merchant_intelligence" / "intent_routing_snapshot.json")
+OUTCOMES = ("routed", "clarify", "misroute", "miss")
+
+
+def classify(analysis, expected):
+    """How the engine routes one query (mirrors scripts/phase0_baseline.py)."""
+    if not analysis.get("is_task"):
+        return "miss"
+    if analysis.get("clarification"):
+        return "clarify"
+    if analysis.get("primary") == expected:
+        return "routed"
+    return "misroute"
+
+
+def _routing_map():
+    return {e["query"]: classify(analyze(e["query"]), e["intent"])
+            for e in INTENT_GOLDEN}
 
 
 # ── [1] well-formedness ───────────────────────────────────────────────────
@@ -104,6 +132,46 @@ for text, expected, raw in violations:
           f"expected {expected} matched raw regex {raw[:3]}")
 check("all queries novel (no raw regex reaches the expected intent)",
       not violations, f"{len(violations)} violation(s)")
+
+# ── [3] routing regression snapshot (freezes TODAY's behavior) ────────────
+print("\n[3] routing regression snapshot")
+actual = _routing_map()
+if os.environ.get("REBUILD_ROUTING_SNAPSHOT") == "1":
+    SNAPSHOT_FILE.write_text(
+        json.dumps({"engine": "regex + ~semantic fallback (Tier 2 off)",
+                    "rows": actual},
+                   indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+    check("routing snapshot regenerated (REBUILD_ROUTING_SNAPSHOT=1)", True,
+          str(SNAPSHOT_FILE))
+elif SNAPSHOT_FILE.exists():
+    try:
+        old = json.loads(SNAPSHOT_FILE.read_text(encoding="utf-8")).get("rows", {})
+    except Exception:
+        old = {}
+    check("routing snapshot file is valid JSON", bool(old), str(SNAPSHOT_FILE))
+    diffs = [(q, old[q], now) for q, now in actual.items()
+             if q in old and old[q] != now]
+    missing = [q for q in actual if q not in old]
+    for q, prev, now in diffs:
+        check(f"routing stable: {q!r}", False, f"was {prev}, now {now}")
+    check("routing matches snapshot (no drift)", not diffs,
+          f"{len(diffs)} drifted — run REBUILD_ROUTING_SNAPSHOT=1 only after review")
+    check("snapshot covers every golden query", not missing,
+          repr(missing[:3]))
+else:
+    # Fresh checkout with no snapshot: bootstrap it so the gate exists, then
+    # the next run asserts against it.
+    SNAPSHOT_FILE.write_text(
+        json.dumps({"engine": "regex + ~semantic fallback (Tier 2 off)",
+                    "rows": actual},
+                   indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+    check("routing snapshot missing — bootstrapped from current behavior",
+          True, "commit it; refresh deliberately with REBUILD_ROUTING_SNAPSHOT=1")
+
+agg = {o: sum(1 for v in actual.values() if v == o) for o in OUTCOMES}
+print(f"  routing today: {agg}")
 
 print(f"\n  {PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
