@@ -120,6 +120,11 @@ export default function RuleEnginePage() {
   const [synLoading, setSynLoading] = useState(false)
   const [synMsg, setSynMsg] = useState(null)
   const [synSel, setSynSel] = useState(new Set())
+  // Tier 2 spot-check — shadow decisions review (Phase-1 auto-run band)
+  const [sr, setSr] = useState(null)
+  const [srBand, setSrBand] = useState('would_act')
+  const [srLoading, setSrLoading] = useState(false)
+  const [srMsg, setSrMsg] = useState(null)
 
   useEffect(() => {
     api
@@ -308,6 +313,39 @@ export default function RuleEnginePage() {
       setSynMsg({ kind: 'error', text: String(e.message || e) })
     } finally {
       setSynLoading(false)
+    }
+  }
+
+  // ── Tier 2 spot-check: shadow-decision review (Phase-1 auto-run band) ──
+  async function refreshSr() {
+    setSrLoading(true)
+    setSrMsg(null)
+    try {
+      setSr(await api.shadowReview(srBand, 200))
+      setSrMsg({ kind: 'success', text: 'Shadow review refreshed.' })
+    } catch (e) {
+      setSrMsg({ kind: 'error', text: String(e.message || e) })
+    } finally {
+      setSrLoading(false)
+    }
+  }
+
+  function switchSrBand(band) {
+    setSrBand(band)
+    setSrMsg(null)
+  }
+
+  async function labelSr(entryId, correct, intent = '') {
+    setSrLoading(true)
+    setSrMsg(null)
+    try {
+      await api.shadowReviewLabel(entryId, correct, intent)
+      setSr(await api.shadowReview(srBand, 200))
+      setSrMsg({ kind: 'success', text: `Marked ${correct ? 'correct' : 'wrong'}.` })
+    } catch (e) {
+      setSrMsg({ kind: 'error', text: String(e.message || e) })
+    } finally {
+      setSrLoading(false)
     }
   }
 
@@ -1617,6 +1655,194 @@ export default function RuleEnginePage() {
             </div>
           </div>
 
+          {/* ── Tier 2 spot-check — shadow decisions review ── */}
+          <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-outline-variant bg-surface-container-low px-5 py-3.5">
+              <h3 className="flex items-center gap-2 text-sm font-bold text-on-surface">
+                <span className="msi text-[18px] text-primary">fact_check</span>
+                Tier 2 spot-check — shadow decisions
+              </h3>
+              <span className="font-plex text-[10px] font-bold uppercase tracking-wider text-outline">
+                review the auto-run band · data/tier2_shadow.jsonl
+              </span>
+            </div>
+            <div className="p-5">
+              <p className="mb-4 font-plex text-[12px] leading-relaxed text-on-surface-variant">
+                The embedding tier only logs decisions that would have been <b>asked</b> as a
+                clarification — so the confident auto-run band (<b>would act</b>) never gets a free
+                label from real usage. This panel is the manual spot-check the Phase-2 go/no-go
+                needs: mark each decision correct/wrong to build per-intent precision.
+              </p>
+
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                {['would_act', 'would_not', 'all'].map((b) => (
+                  <button
+                    key={b}
+                    onClick={() => switchSrBand(b)}
+                    className={`rounded-full px-3 py-1.5 font-plex text-[11px] font-bold transition-all active:scale-95 ${
+                      srBand === b
+                        ? 'bg-primary text-on-primary'
+                        : 'border border-outline-variant bg-surface-container-lowest text-on-surface-variant hover:border-primary hover:text-primary'
+                    }`}
+                  >
+                    {b === 'would_act' ? 'would act' : b === 'would_not' ? 'would not act' : 'all'}
+                  </button>
+                ))}
+                <button
+                  onClick={refreshSr}
+                  disabled={srLoading}
+                  className="ml-auto flex items-center gap-1.5 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 font-plex text-[11px] font-bold text-on-surface-variant transition-all hover:border-primary hover:text-primary active:scale-95 disabled:opacity-40"
+                >
+                  <span className="msi text-[15px]">{srLoading ? 'hourglass_top' : 'refresh'}</span>
+                  Refresh
+                </button>
+              </div>
+
+              {sr?.stats && (sr.stats.reviewed > 0 || sr.stats.band_total > 0) && (
+                <div className="mb-4 flex flex-wrap items-center gap-3">
+                  <span className="rounded-full bg-surface-container-high px-3 py-1 font-plex text-[11px] font-bold text-on-surface-variant">
+                    {sr.stats.band_total || 0} in band
+                  </span>
+                  <span className="rounded-full bg-green-100 px-3 py-1 font-plex text-[11px] font-bold text-green-800">
+                    {sr.stats.reviewed || 0} reviewed
+                  </span>
+                  <span className={`rounded-full px-3 py-1 font-plex text-[11px] font-bold ${
+                    (sr.stats.precision || 0) >= 0.85
+                      ? 'bg-green-100 text-green-800'
+                      : (sr.stats.precision || 0) >= 0.6
+                        ? 'bg-amber-50 text-amber-800'
+                        : 'bg-error-container/40 text-error'
+                  }`}
+                  >
+                    precision {(sr.stats.precision || 0) * 100}%
+                  </span>
+                  {sr.stats.precision >= 0.85 && sr.stats.reviewed >= 10 && (
+                    <span className="rounded-full bg-green-100 px-3 py-1 font-plex text-[11px] font-bold text-green-800">
+                      Phase-2 go/no-go: ready to consider enabling
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {sr?.tier2_fit && Object.keys(sr.tier2_fit.per_intent || {}).length > 0 && (
+                <div className="mb-4 overflow-hidden rounded-xl border border-outline-variant">
+                  <div className="flex items-center justify-between bg-surface-container-high px-4 py-2">
+                    <span className="font-plex text-[11px] font-bold text-on-surface-variant">
+                      Tier-2 fitted gates (Phase 3)
+                    </span>
+                    <span className="font-mono text-[10px] text-on-surface-variant">
+                      margin {sr.tier2_fit.margin ?? sr.tier2_fit.defaults.margin}
+                    </span>
+                  </div>
+                  <table className="w-full text-left font-mono text-[11px]">
+                    <thead className="bg-surface-container-low text-on-surface-variant">
+                      <tr>
+                        <th className="px-4 py-1.5 font-bold">intent</th>
+                        <th className="px-2 py-1.5 font-bold">labeled</th>
+                        <th className="px-2 py-1.5 font-bold">precision</th>
+                        <th className="px-4 py-1.5 font-bold">threshold</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(sr.tier2_fit.per_intent).map(([intent, g]) => (
+                        <tr key={intent} className="border-t border-outline-variant/60">
+                          <td className="px-4 py-1.5 font-bold text-primary">{intent}</td>
+                          <td className="px-2 py-1.5">
+                            {g.samples}/{g.needed}
+                            {g.would_not_correct > 0 && (
+                              <span className="ml-1 text-outline" title="correct would-not picks (lowering evidence)">
+                                +{g.would_not_correct}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {g.precision != null ? `${(g.precision * 100).toFixed(0)}%` : '–'}
+                          </td>
+                          <td className="px-4 py-1.5">
+                            {g.threshold != null ? (
+                              <span className="rounded bg-primary/10 px-1.5 py-0.5 font-bold text-primary">
+                                {g.threshold}
+                              </span>
+                            ) : (
+                              <span className="text-outline">needs {g.needed - g.samples} more</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {sr && sr.entries?.length ? (
+                <div className="space-y-3">
+                  {sr.entries.map((e) => (
+                    <div
+                      key={e.entry_id}
+                      className={`rounded-xl border p-4 ${
+                        e.label
+                          ? e.label.correct
+                            ? 'border-green-300 bg-green-50/40'
+                            : 'border-error/30 bg-error-container/20'
+                          : 'border-outline-variant bg-surface-container-low'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="mb-1 break-words font-plex text-[12px] text-on-surface">
+                            {e.text}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-on-surface-variant">
+                            <span className="rounded bg-primary/10 px-1.5 py-0.5 font-bold text-primary">
+                              {e.tier2_intent}
+                            </span>
+                            <span>conf {e.tier2_confidence}</span>
+                            <span>margin {e.tier2_margin}</span>
+                            <span title={`matched exemplar: ${e.tier2_exemplar}`}>
+                              “{String(e.tier2_exemplar || '').slice(0, 40)}”
+                            </span>
+                            {e.tier1_intent && (
+                              <span className="text-outline">tier1 {e.tier1_intent}</span>
+                            )}
+                          </div>
+                          {e.label?.note && (
+                            <p className="mt-1 font-plex text-[11px] italic text-on-surface-variant">
+                              {e.label.note}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            onClick={() => labelSr(e.entry_id, true)}
+                            disabled={srLoading}
+                            className="flex items-center gap-1 rounded-lg border border-green-300 bg-green-50 px-2.5 py-1.5 font-plex text-[11px] font-bold text-green-800 transition-all hover:bg-green-100 active:scale-95 disabled:opacity-40"
+                          >
+                            <span className="msi text-[14px]">check</span>Correct
+                          </button>
+                          <button
+                            onClick={() => labelSr(e.entry_id, false)}
+                            disabled={srLoading}
+                            className="flex items-center gap-1 rounded-lg border border-error/30 bg-error-container/20 px-2.5 py-1.5 font-plex text-[11px] font-bold text-error transition-all hover:bg-error-container/40 active:scale-95 disabled:opacity-40"
+                          >
+                            <span className="msi text-[14px]">close</span>Wrong
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-outline-variant px-4 py-8 text-center">
+                  <p className="font-plex text-[12px] text-on-surface-variant">
+                    {srLoading
+                      ? 'Loading…'
+                      : 'No shadow decisions in this band yet — switch the semantic-tier mode to shadow and let real requests accumulate, then review them here.'}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* ── Learning — pattern suggestions ── */}
           <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-outline-variant bg-surface-container-low px-5 py-3.5">
@@ -1780,6 +2006,19 @@ export default function RuleEnginePage() {
           }`}
         >
           {synMsg.text}
+        </div>
+      )}
+      {srMsg && (
+        <div
+          className={`rounded-xl border px-5 py-3 font-plex text-[13px] font-semibold ${
+            srMsg.kind === 'error'
+              ? 'border-error/20 bg-error-container/30 text-error'
+              : srMsg.kind === 'success'
+                ? 'border-secondary/20 bg-secondary-container/30 text-on-secondary-container'
+                : 'border-outline-variant bg-surface-container-low text-on-surface-variant'
+          }`}
+        >
+          {srMsg.text}
         </div>
       )}
     </div>

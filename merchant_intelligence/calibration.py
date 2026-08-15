@@ -31,6 +31,23 @@ explainable in the UI.
 
 The log lives in data/request_log.jsonl (survives DB rebuilds) — override
 with the MERCHANT_CALIBRATION_FILE env var (tests use a temp file).
+
+Phase 3 (design doc §7) adds a SECOND evidence source: the Tier-2
+shadow-review labels (semantic.py's label_entry). Those labels are
+accept/override evidence for the auto-run band — the band clarification
+outcomes never cover. fit_tier2() folds them into per-intent Tier-2 gates:
+
+  - per-intent THRESHOLD once an intent has >= TIER2_PER_INTENT_MIN labeled
+    would-act decisions (same banded acceptance scan as the ask fit),
+  - a GLOBAL margin fit from all labeled would-act decisions (margin is
+    intent competition, not identity),
+  - a conservative LOWERING signal from correct would-not decisions: an
+    intent whose picks are right but sit under the gate (the ONNX
+    under-mapped cosine band) gets its threshold dropped to the floor of
+    the highest band with >= 3 such samples.
+
+semantic.resolve() consults fit_tier2() per request; the review labels live
+in data/tier2_shadow_review.jsonl (MERCHANT_TIER2_REVIEW_FILE override).
 """
 
 import json
@@ -73,6 +90,19 @@ _GAP_BANDS = [(0.0, 1.0, "0-1"), (1.0, 2.0, "1-2"), (2.0, 3.0, "2-3"),
               (3.0, 4.0, "3-4"), (4.0, 6.0, "4-6")]
 GAP_FLOOR = 0.5      # never race-check below this gap (noise floor)
 GAP_CEILING = 6.0    # never widen the race window beyond this gap
+
+# ── Tier-2 gates (Phase 3) ────────────────────────────────────────────────
+# Fitted from the §7 shadow-review labels (accept/override evidence for the
+# auto-run band). Threshold is per intent (an intent's reliability is its
+# own); margin is global (intent competition, not identity).
+TIER2_PER_INTENT_MIN = 20   # labeled would-act decisions per intent before fit
+TIER2_LOWER_FLOOR = 40      # never fit a Tier-2 threshold below this (noise)
+TIER2_MARGIN_FLOOR = 0
+TIER2_MARGIN_CEILING = 40
+_T2_BANDS = [(0, 20, "0-19"), (20, 40, "20-39"), (40, 60, "40-59"),
+             (60, 80, "60-79"), (80, 101, "80-100")]
+_T2_MARGIN_BANDS = [(0, 10, "0-9"), (10, 20, "10-19"), (20, 30, "20-29"),
+                    (30, 40, "30-39"), (40, 101, "40+")]
 
 _lock = threading.Lock()
 
@@ -410,3 +440,170 @@ def params() -> Dict[str, Any]:
         "gap_threshold": f["gap_threshold"],
         "gap_active": f["gap_active"],
     }
+
+
+# ── Tier 2: per-intent gates from the §7 shadow-review labels ─────────────
+# The spot-check labels (semantic.label_entry) are accept/override evidence
+# for the auto-run band — the band clarification outcomes never cover.
+# fit_tier2() reads the labels + shadow entries (both file seams, so tests
+# stay hermetic) and folds them into per-intent gates that
+# semantic.resolve() consults per request (Phase 3 of design doc §7).
+_t2_cache: Dict[str, Any] = {"key": None, "fit": None}
+
+
+def _t2_cache_key() -> str:
+    """State of the Tier-2 fit inputs (review + shadow files)."""
+    from .tasks import semantic
+    parts = []
+    for p in (semantic._review_path(), semantic._shadow_path()):
+        try:
+            st = p.stat()
+            parts.append(f"{st.st_mtime_ns}:{st.st_size}")
+        except OSError:
+            parts.append("missing")
+    return "|".join(parts)
+
+
+def _scan_t2_confidence(rows: List[Dict[str, Any]], start: int) -> int:
+    """Banded acceptance scan over the confidence axis (same solid/poor
+    logic as fit()): poor acceptance in a band raises the gate to the band's
+    top edge; a solid band drops it to the floor. Bands with <3 samples are
+    skipped — no evidence means the gate is left where it was."""
+    threshold = start
+    for lo, hi, _label in reversed(_T2_BANDS):
+        band = [r for r in rows
+                if lo <= int(r.get("tier2_confidence", 0)) < hi]
+        if len(band) < 3:
+            continue
+        acc = sum(1 for r in band if r.get("label", {}).get("correct"))
+        acc = acc / len(band)
+        if acc < TARGET_ACCEPTANCE:
+            threshold = min(hi, ASK_CEILING)
+            break
+        threshold = min(threshold, lo)
+    return threshold
+
+
+def _scan_t2_margin(rows: List[Dict[str, Any]], start: int) -> int:
+    """Banded acceptance scan over the margin axis (calibrated-point gap
+    over the runner-up intent)."""
+    margin = start
+    for lo, hi, _label in reversed(_T2_MARGIN_BANDS):
+        band = [r for r in rows
+                if lo <= float(r.get("tier2_margin", 0) or 0) < hi]
+        if len(band) < 3:
+            continue
+        acc = sum(1 for r in band if r.get("label", {}).get("correct"))
+        acc = acc / len(band)
+        if acc < TARGET_ACCEPTANCE:
+            margin = min(hi, TIER2_MARGIN_CEILING)
+            break
+        margin = min(margin, lo)
+    return margin
+
+
+def _t2_lower_floor(correct_wn: List[Dict[str, Any]],
+                    threshold: int) -> Optional[int]:
+    """Highest confidence band (below the current threshold) with >=3
+    correct would-not picks -> its floor. Those picks were RIGHT but never
+    acted — evidence the gate sits too high for this intent (the ONNX
+    under-mapped cosine band the doc flags). None when nothing qualifies."""
+    best: Optional[int] = None
+    for lo, hi, _label in _T2_BANDS:
+        if lo >= threshold:
+            continue
+        band = [r for r in correct_wn
+                if lo <= int(r.get("tier2_confidence", 0)) < hi]
+        if len(band) >= 3:
+            best = lo
+    return best
+
+
+def fit_tier2() -> Dict[str, Any]:
+    """Fit per-intent Tier-2 gates from the §7 shadow-review labels.
+
+    Per intent (keyed by tier2_intent): a THRESHOLD once >=
+    TIER2_PER_INTENT_MIN labeled would-act decisions exist, fitted by the
+    same banded acceptance scan as the ask threshold — an intent whose
+    high-confidence auto-runs keep getting marked wrong gets its gate
+    raised, a solid one drops toward its floor. A correct would-not pick is
+    a missed opportunity: >=3 of them in a band below the gate lower it to
+    that band's floor (never below TIER2_LOWER_FLOOR).
+
+    Margin is a SINGLE global fit over all labeled would-act decisions
+    (margin is intent competition, not identity).
+
+    Returns the fitted state plus per-intent progress (samples/needed) so
+    the UI can show "7/20 labeled" before a gate exists. Cached by review +
+    shadow file state; label_entry's rewrite bumps the mtime, so the next
+    resolve() sees the new gates."""
+    from .tasks import semantic
+    key = _t2_cache_key()
+    with _lock:
+        if _t2_cache["key"] == key:
+            return _t2_cache["fit"]
+    default_threshold = semantic.SEMANTIC_THRESHOLD
+    default_margin = semantic.SEMANTIC_MARGIN
+    labels = semantic.read_review()
+    per: Dict[str, Dict[str, Any]] = {}
+    all_wa: List[Dict[str, Any]] = []
+    for e in semantic.read_shadow():
+        lbl = labels.get(semantic.entry_id(e))
+        if not lbl:
+            continue
+        row = dict(e)
+        row["label"] = lbl
+        intent = e.get("tier2_intent") or "?"
+        b = per.setdefault(intent, {"wa": [], "wn_correct": []})
+        if e.get("tier2_would_act"):
+            b["wa"].append(row)
+            all_wa.append(row)
+        elif lbl.get("correct"):
+            b["wn_correct"].append(row)
+    per_intent: Dict[str, Dict[str, Any]] = {}
+    for intent, b in per.items():
+        wa = b["wa"]
+        correct = sum(1 for r in wa if r["label"].get("correct"))
+        if len(wa) < TIER2_PER_INTENT_MIN:
+            per_intent[intent] = {
+                "samples": len(wa),
+                "needed": TIER2_PER_INTENT_MIN,
+                "threshold": None,
+                "precision": (round(correct / len(wa), 3) if wa else None),
+                "would_not_correct": len(b["wn_correct"]),
+            }
+            continue
+        threshold = _scan_t2_confidence(wa, default_threshold)
+        floor = _t2_lower_floor(b["wn_correct"], threshold)
+        if floor is not None:
+            threshold = min(threshold, floor)
+        threshold = max(TIER2_LOWER_FLOOR, min(threshold, ASK_CEILING))
+        per_intent[intent] = {
+            "samples": len(wa),
+            "needed": TIER2_PER_INTENT_MIN,
+            "threshold": threshold,
+            "precision": round(correct / len(wa), 3),
+            "would_not_correct": len(b["wn_correct"]),
+        }
+    margin: Optional[int] = None
+    if len(all_wa) >= TIER2_PER_INTENT_MIN:
+        margin = max(TIER2_MARGIN_FLOOR,
+                     min(_scan_t2_margin(all_wa, default_margin),
+                         TIER2_MARGIN_CEILING))
+    fitted = {
+        "active": any(v["threshold"] is not None
+                      for v in per_intent.values()),
+        "fitted_at": time.time(),
+        "per_intent": per_intent,
+        "margin": margin,
+        "labeled": sum(len(b["wa"]) + len(b["wn_correct"])
+                       for b in per.values()),
+        "defaults": {"threshold": default_threshold,
+                      "margin": default_margin},
+        "min_samples": TIER2_PER_INTENT_MIN,
+        "lower_floor": TIER2_LOWER_FLOOR,
+    }
+    with _lock:
+        _t2_cache["key"] = key
+        _t2_cache["fit"] = fitted
+    return fitted

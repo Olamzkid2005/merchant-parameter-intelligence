@@ -349,13 +349,49 @@ def _get_exemplar_vecs(exemplars: Dict[str, List[str]], enc) \
     return cached
 
 
+# ── Phase-3 gates (design doc §7): fitted per-intent thresholds ──────────
+def _gate_fingerprint() -> str:
+    """State of the Tier-2 fit inputs (the review labels), so the resolve
+    lru cache evicts when a label moves a fitted gate. Keyed on the review
+    file only — new UNLABELED shadow entries can never move a gate, so they
+    must not invalidate cached results either."""
+    try:
+        st = _review_path().stat()
+        return f"{st.st_mtime_ns}:{st.st_size}"
+    except OSError:
+        return "missing"
+
+
+def _gate_for(intent: str) -> Tuple[int, int]:
+    """Per-request Tier-2 gates (threshold, margin) for a winning intent.
+
+    Phase 3: calibration.fit_tier2() folds the §7 shadow-review labels into
+    per-intent thresholds (accept/override evidence on the auto-run band);
+    the margin is a single GLOBAL fit — intent competition, not identity.
+    Falls back to the Phase-1 constants when an intent has no fitted gate
+    or the fit is unavailable."""
+    threshold, margin = SEMANTIC_THRESHOLD, SEMANTIC_MARGIN
+    try:
+        from .. import calibration
+        f = calibration.fit_tier2()
+        per = (f.get("per_intent") or {}).get(intent)
+        if per and per.get("threshold") is not None:
+            threshold = int(per["threshold"])
+        if f.get("margin") is not None:
+            margin = int(f["margin"])
+    except Exception as exc:
+        logger.warning("tier2 gate lookup failed: %s", exc)
+    return threshold, margin
+
+
 @lru_cache(maxsize=256)
-def _rank_cached(masked: str, fingerprint: str, encoder_id: str
-                 ) -> Optional[Dict[str, Any]]:
+def _rank_cached(masked: str, fingerprint: str, encoder_id: str,
+                 gate_fp: str) -> Optional[Dict[str, Any]]:
     """Rank the masked query against every intent's exemplars (cached).
 
-    Cache key = masked text + exemplar fingerprint + encoder id, so a config
-    hot-reload or model swap can never serve stale vectors.
+    Cache key = masked text + exemplar fingerprint + encoder id + gate
+    fingerprint, so a config hot-reload, model swap, or a review label that
+    moves a fitted gate can never serve stale vectors or stale gates.
     """
     exemplars = load_exemplars()
     if not exemplars:
@@ -385,6 +421,7 @@ def _rank_cached(masked: str, fingerprint: str, encoder_id: str
     second_cos = second[1] if second else 0.0
     conf = _calibrate(w_cos)
     second_conf = _calibrate(second_cos)
+    threshold, margin = _gate_for(w_intent)
     return {
         "intent": w_intent,
         "exemplar": w_ph,
@@ -393,8 +430,8 @@ def _rank_cached(masked: str, fingerprint: str, encoder_id: str
         "second_intent": second[0] if second else None,
         "margin": conf - second_conf,
         "would_act": bool(
-            w_cos >= COS_FLOOR and conf >= SEMANTIC_THRESHOLD
-            and conf - second_conf >= SEMANTIC_MARGIN),
+            w_cos >= COS_FLOOR and conf >= threshold
+            and conf - second_conf >= margin),
         "encoder": encoder_id,
     }
 
@@ -412,7 +449,8 @@ def resolve(text: str, task: Optional[Dict[str, Any]] = None) -> Optional[Dict[s
     exemplars = load_exemplars()
     if not exemplars:
         return None
-    return _rank_cached(masked, _fingerprint(exemplars), _make_encoder().id)
+    return _rank_cached(masked, _fingerprint(exemplars), _make_encoder().id,
+                        _gate_fingerprint())
 
 
 # ── Shadow log (Phase 1) ──────────────────────────────────────────────────
@@ -462,3 +500,168 @@ def read_shadow() -> List[Dict[str, Any]]:
     except OSError:
         return []
     return out
+
+
+# ── Shadow review (Phase 1 spot-check: the auto-run band) ────────────────
+# The design doc §7 is explicit: clarification-outcome labels only cover the
+# ambiguous band — a Tier-2 decision confident enough to auto-run
+# (tier2_would_act) never reaches the clarification picker, so it never gets
+# a free label there. Before Phase 2 can be turned on, someone must manually
+# spot-check that high-confidence band. This section is that tool: it
+# assigns every shadow entry a stable id, lets a reviewer mark each entry
+# correct/wrong (the ground-truth label), and aggregates per-intent
+# precision on the would-act band so the Phase 2 go/no-go has evidence.
+# Labels live in data/tier2_shadow_review.jsonl (gitignored, append-only;
+# MERCHANT_TIER2_REVIEW_FILE overrides for tests).
+
+
+def _review_path() -> Path:
+    override = os.environ.get("MERCHANT_TIER2_REVIEW_FILE")
+    if override:
+        return Path(override)
+    return config.DATA_DIR / "tier2_shadow_review.jsonl"
+
+
+def entry_id(entry: Dict[str, Any]) -> str:
+    """Stable id for a shadow entry (ts + text), so labels survive re-reads
+    of the append-only log and never collide."""
+    key = f"{entry.get('ts')}::{entry.get('text')}"
+    return hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
+
+
+def read_review() -> Dict[str, Dict[str, Any]]:
+    """All review labels keyed by entry id (oldest first; corrupt lines
+    skipped — a hand-edited line must never crash the review UI)."""
+    path = _review_path()
+    if not path.exists():
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if isinstance(rec, dict) and rec.get("entry_id"):
+                    out[rec["entry_id"]] = rec
+    except OSError:
+        return {}
+    return out
+
+
+def label_entry(entry_id_: str, correct: bool, *,
+                note: str = "", intent: str = "") -> Dict[str, Any]:
+    """Record a reviewer's verdict on one shadow entry.
+
+    correct=True  the Tier-2 pick was right (or `intent` names the intent
+                  the reviewer says it SHOULD have been)
+    correct=False the pick was wrong — the reviewer can pass the actual
+                  intent via `intent` so precision stats can see the miss.
+    Re-labeling an entry overwrites the earlier verdict (latest wins).
+    """
+    rec = {
+        "entry_id": entry_id_,
+        "ts": time.time(),
+        "correct": bool(correct),
+        "intent": (intent or "").strip().lower(),
+        "note": (note or "")[:300],
+    }
+    with _lock:
+        path = _review_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            existing = read_review()
+            existing[entry_id_] = rec
+            # Rewrite in stable order so a re-label never duplicates rows.
+            with open(path, "w", encoding="utf-8") as fh:
+                for eid in sorted(existing):
+                    fh.write(json.dumps(existing[eid]) + "\n")
+        except OSError as exc:
+            logger.warning("tier2 shadow review write failed: %s", exc)
+            return {"ok": False, "reason": str(exc)}
+    return {"ok": True, **rec}
+
+
+def review(band: str = "all", limit: int = 100) -> Dict[str, Any]:
+    """Shadow entries joined with their review labels, band-filtered.
+
+    band="all"       every logged decision
+    band="would_act" only the high-confidence auto-run band — the §7
+                     spot-check target that clarification labels never cover
+    band="would_not" everything else (the tier would NOT have acted)
+
+    Returns entries (oldest first, newest labels attached) plus
+    review_stats() so the UI can render the panel in one call.
+    """
+    labels = read_review()
+    entries = []
+    for e in read_shadow():
+        wa = bool(e.get("tier2_would_act"))
+        if band == "would_act" and not wa:
+            continue
+        if band == "would_not" and wa:
+            continue
+        eid = entry_id(e)
+        row = dict(e)
+        row["entry_id"] = eid
+        row["label"] = labels.get(eid)
+        entries.append(row)
+    entries.sort(key=lambda r: float(r.get("ts") or 0))
+    return {
+        "band": band,
+        "count": len(entries),
+        "labeled": sum(1 for r in entries if r.get("label")),
+        "entries": entries[-limit:],
+        "stats": review_stats(),
+        "file": str(_shadow_path()),
+        "labels_file": str(_review_path()),
+    }
+
+
+def review_stats() -> Dict[str, Any]:
+    """Precision on the §7 spot-check band — the Phase 2 go/no-go evidence.
+
+    Only LABELED would_act entries count (that is the band with no free
+    labels). Per intent: reviewed / correct / precision. `correct` follows
+    the reviewer's verdict; when they supplied the actual intent on a miss,
+    `missed_as` shows what the tier should have picked.
+    """
+    labels = read_review()
+    if not labels:
+        return {"reviewed": 0, "band_total": 0, "per_intent": {}}
+    entries = [e for e in read_shadow() if e.get("tier2_would_act")]
+    per: Dict[str, Dict[str, Any]] = {}
+    reviewed = 0
+    for e in entries:
+        lbl = labels.get(entry_id(e))
+        if not lbl:
+            continue
+        reviewed += 1
+        intent = e.get("tier2_intent") or "?"
+        b = per.setdefault(intent, {"reviewed": 0, "correct": 0,
+                                    "missed_as": []})
+        b["reviewed"] += 1
+        if lbl.get("correct"):
+            b["correct"] += 1
+        elif lbl.get("intent"):
+            b["missed_as"].append(lbl["intent"])
+    per_intent = {}
+    for intent, b in per.items():
+        per_intent[intent] = {
+            "reviewed": b["reviewed"],
+            "correct": b["correct"],
+            "precision": round(b["correct"] / b["reviewed"], 3),
+            "missed_as": b["missed_as"][-5:],
+        }
+    total_correct = sum(b["correct"] for b in per.values())
+    return {
+        "reviewed": reviewed,
+        "band_total": len(entries),
+        "correct": total_correct,
+        "precision": round(total_correct / reviewed, 3) if reviewed else 0.0,
+        "per_intent": per_intent,
+    }

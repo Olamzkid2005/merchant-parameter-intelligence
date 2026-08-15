@@ -373,6 +373,7 @@ python tests/test_next_level.py       # LLM brief + self-improve harness
 python tests/test_semantic_shadow.py  # Tier-2 semantic layer (offline, shadow mode)
 python tests/test_intent_golden.py    # golden-set novelty contract (offline)
 python tests/test_enrichment.py       # Tier-1 WordNet enrichment pipeline (hermetic: fake synsets + temp config)
+python tests/test_shadow_review.py    # Tier-2 §7 spot-check tooling + Phase-3 fit_tier2 gates (hermetic: temp shadow + review files)
 python tests/test_app_start.py        # launcher pre-flight
 python tests/test_watch_mode.py       # --watch rebuild flag
 python tests/test_foreground_mode.py  # --log-follow mode
@@ -381,8 +382,10 @@ python tests/test_open_flag.py        # --open browser flag
 
 `tests/test_tasks.py` hits the **live API** for its `[5*]` sections — the app
 must be running (`python app.start app`) or those sections fail with
-connection-refused (not a regression). Last full run: **593/593 pass** with
-the app up.
+connection-refused (not a regression). Last full run: **all suites green**
+(602 task checks incl. live API, 38 enrichment, 22 semantic shadow, 9 golden,
+28 shadow review, 35 engine upgrades, 28 engine v2, 69 next-level) with the
+app up.
 
 Also: `scripts/build_intelligence_db.py` ends with `verify_search()` proofs
 (MRSP rows loaded, Change sheet rows loaded, ELEYELE SS resolves, MAX-INFO

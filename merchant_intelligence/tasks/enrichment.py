@@ -552,6 +552,45 @@ def _append_exemplars(phrases: List[str]) -> None:
                              + "\n", encoding="utf-8")
 
 
+def append_exemplar(intent: str, phrase: str) -> bool:
+    """Append ONE approved phrase to data/exemplars.json (Tier 2).
+
+    Phase B of the design doc §5: a mined n-gram approved via
+    feedback.apply_pattern() becomes BOTH a regex pattern (existing
+    behavior) AND a Tier-2 exemplar — one curated approval, two consumers.
+    Idempotent; keeps the exemplar manifest's md5 honest. Returns True when
+    the file actually changed (False when missing/unreadable/duplicate).
+    """
+    intent = (intent or "").strip().lower()
+    phrase = (phrase or "").strip().lower()
+    if not intent or not phrase:
+        return False
+    path = _exemplars_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        intents = data.get("intents") or {}
+    except (OSError, json.JSONDecodeError, ValueError):
+        return False  # no exemplar file — the keyword cold start still covers
+    bucket = intents.setdefault(intent, [])
+    if phrase in bucket:
+        return False
+    bucket.append(phrase)
+    blob = json.dumps({"intents": intents}, indent=2, ensure_ascii=False)
+    path.write_text(blob + "\n", encoding="utf-8")
+    manifest_path = config.DATA_DIR / "exemplar_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        manifest = {}
+    manifest["generated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    manifest["exemplars_md5"] = hashlib.md5(blob.encode("utf-8")).hexdigest()
+    manifest["phrase_count"] = sum(len(v) for v in intents.values())
+    manifest["per_intent"] = {i: len(v) for i, v in sorted(intents.items())}
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False)
+                             + "\n", encoding="utf-8")
+    return True
+
+
 def _append_manifest(applied: List[Dict[str, Any]]) -> None:
     """Provenance: every applied auto-pattern is auditable on disk even
     though data/ is gitignored (design doc §9)."""

@@ -477,6 +477,15 @@ def apply_pattern(ngram: str, intent: str, weight: Optional[int] = None) -> Opti
         enrichment.regenerate_vocab_defaults()
     except Exception as exc:  # noqa: BLE001 — never fail the accept on sync
         logger.warning("vocab.py lockstep regeneration failed: %s", exc)
+    # Phase B (design doc §5): one curated approval, two consumers. The
+    # approved n-gram becomes a Tier-2 exemplar too, so the embedding tier
+    # learns the same phrase the regex tier just learned. Idempotent — a
+    # duplicate is a no-op, never a write.
+    try:
+        from .tasks import enrichment
+        enrichment.append_exemplar(intent, ngram)
+    except Exception as exc:  # noqa: BLE001 — never fail the accept on sync
+        logger.warning("exemplar append failed: %s", exc)
     return new_spec
 
 

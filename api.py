@@ -1137,6 +1137,46 @@ def synonym_manifest():
     return enrichment.manifest()
 
 
+class ShadowReviewLabelRequest(BaseModel):
+    entry_id: str = ""
+    correct: bool = True
+    intent: str = ""   # optional: the intent it SHOULD have been (on a miss)
+    note: str = ""
+
+
+@app.get("/api/shadow/review")
+def shadow_review(band: str = "all", limit: int = 100):
+    """Phase-1 spot-check tool (design doc §7): shadow decisions joined with
+    review labels, band-filtered, plus per-intent precision on the
+    high-confidence would-act band — the band clarification labels never
+    cover. This is the evidence the Phase 2 go/no-go needs."""
+    from merchant_intelligence import calibration
+    from merchant_intelligence.tasks import semantic
+    if band not in ("all", "would_act", "would_not"):
+        raise HTTPException(status_code=400,
+                            detail="band must be all|would_act|would_not")
+    out = semantic.review(band=band, limit=max(1, min(500, int(limit))))
+    # Phase 3: per-intent fitted gates (the auto-run band's accept/override
+    # evidence) so the panel can show learning progress in the same view.
+    out["tier2_fit"] = calibration.fit_tier2()
+    return out
+
+
+@app.post("/api/shadow/review")
+def shadow_review_label(req: ShadowReviewLabelRequest):
+    """Record a reviewer's verdict on one shadow entry (latest wins)."""
+    from merchant_intelligence.tasks import semantic
+    eid = (req.entry_id or "").strip()
+    if not eid:
+        raise HTTPException(status_code=400, detail="entry_id is required")
+    known = {semantic.entry_id(e) for e in semantic.read_shadow()}
+    if eid not in known:
+        raise HTTPException(status_code=400,
+                            detail="entry_id not found in the shadow log")
+    return semantic.label_entry(eid, req.correct, note=req.note,
+                                intent=req.intent)
+
+
 @app.post("/api/task/analyze")
 def task_analyze(req: TaskRequest):
     """Intent-parser debug endpoint (v2): explain WHY a request was routed
@@ -1172,6 +1212,9 @@ def get_calibration():
         "stats": calibration.stats(),
         "fit": calibration.fit(),
         "params": calibration.params(),
+        # Phase 3 (design doc §7): per-intent Tier-2 gates fitted from the
+        # shadow-review labels — the auto-run band's accept/override evidence.
+        "tier2": calibration.fit_tier2(),
     }
 
 

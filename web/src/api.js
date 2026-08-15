@@ -172,7 +172,13 @@ export const api = {
     if (!res.ok) throw new Error('Failed to load synonym manifest')
     return res.json()
   },
+  shadowReview: async (band = 'all', limit = 100) => {
+    const res = await fetch(`${BASE}/shadow/review?band=${band}&limit=${limit}`)
+    if (!res.ok) throw new Error('Failed to load shadow review')
+    return res.json()
   },
+  shadowReviewLabel: (entryId, correct, intent = '', note = '') =>
+    post('/shadow/review', { entry_id: entryId, correct, intent, note }),
   applySuggestion: (ngram, intent, weight) =>
     post('/feedback/suggestions/apply', { ngram, intent, weight }),
   rejectSuggestion: (ngram, intent) =>
