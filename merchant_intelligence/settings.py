@@ -34,6 +34,19 @@ _SPEC = {
     "decisive_match_threshold": (0.0, 100.0, float),
 }
 
+# Mode-style knobs: name -> (allowed values, ...). Same precedence as _SPEC
+# (env var > settings file > default) but validated against a choice list
+# instead of a numeric range. The semantic tier's rollout state:
+#   "off"      -> Tier 2 never runs (default; zero behavior change)
+#   "shadow"   -> Tier 2 decides in the background and logs to
+#                 data/tier2_shadow.jsonl without acting (Phase 1)
+#   "enabled"  -> a confident Tier 2 winner auto-picks its intent instead
+#                 of showing the clarification card (Phase 2)
+_MODE_SPEC: Dict[str, Tuple[str, ...]] = {
+    "semantic_tier_mode": ("off", "shadow", "enabled"),
+}
+_MODE_DEFAULT = "off"
+
 
 def _path() -> Any:
     """Settings file path — override via ENGINE_SETTINGS_FILE env var
@@ -68,12 +81,22 @@ def save(data: Dict[str, Any]) -> None:
         tmp.replace(path)
 
 
-def effective(name: str) -> Optional[float]:
+def effective(name: str):
     """Resolve one knob: env var > settings file > built-in default.
 
-    A value is only accepted when it falls inside the knob's valid range —
-    out-of-range or unparseable values are ignored (default wins).
+    Float knobs: a value is only accepted when it falls inside the knob's
+    valid range — out-of-range or unparseable values are ignored (default
+    wins). Mode knobs: the value must be one of the allowed choices.
     """
+    choices = _MODE_SPEC.get(name)
+    if choices is not None:
+        env = os.environ.get(name.upper())
+        if env is not None and env in choices:
+            return env
+        file_val = load().get(name)
+        if file_val in choices:
+            return file_val
+        return _MODE_DEFAULT
     lo, hi, cast = _SPEC.get(name, (None, None, float))
     if lo is None:
         return None
@@ -111,6 +134,13 @@ def all_settings() -> Dict[str, Any]:
             "source": _source(name),
             "valid_range": list(_SPEC[name][:2]),
         }
+    for name, choices in _MODE_SPEC.items():
+        out[name] = {
+            "value": effective(name),
+            "default": _MODE_DEFAULT,
+            "source": _source(name),
+            "valid_range": list(choices),
+        }
     return out
 
 
@@ -121,6 +151,11 @@ def _source(name: str) -> str:
     if name in load():
         return str(_path())
     return "built-in default"
+
+
+def semantic_tier_mode() -> str:
+    """Resolved Tier-2 rollout state: "off" | "shadow" | "enabled"."""
+    return str(effective("semantic_tier_mode"))
 
 
 def decisive_match_threshold() -> float:

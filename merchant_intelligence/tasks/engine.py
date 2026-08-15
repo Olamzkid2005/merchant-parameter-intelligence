@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from .. import settings as engine_settings
 from ..calibration import params as calibration_params
 from ..preferences import lookup as preference_lookup
 from .db import _connect
@@ -1045,6 +1046,49 @@ def suggest_clarification(
             "options": saved_options,
             "auto_pick": remembered,
         }
+    # Tier 2 — local embedding semantic match (hybrid semantic intent layer,
+    # design doc §3/§7/§10). Tier 1 (regex + the ~semantic fallback) is
+    # inconclusive here — the request is about to be asked. Consult the
+    # embedding tier against per-intent exemplars:
+    #   mode "off"     -> nothing (default; zero behavior change)
+    #   mode "shadow"  -> log the decision, still ask the user (Phase 1)
+    #   mode "enabled" -> a confident Tier-2 winner auto-picks its intent
+    #                      instead of the card, same path as a remembered
+    #                      choice (Phase 2; gated on the §7 baseline)
+    if engine_settings.semantic_tier_mode() != "off":
+        from . import semantic
+        try:
+            t2 = semantic.resolve(t, task)
+        except Exception as exc:
+            logger.warning("tier2 resolve failed: %s", exc)
+            t2 = None
+        if t2:
+            mode = engine_settings.semantic_tier_mode()
+            semantic.log_shadow({
+                "ts": time.time(),
+                "text": t[:300],
+                "mode": mode,
+                "tier1_intent": task.get("intent") if task else None,
+                "would_clarify": True,
+                "tier2_intent": t2["intent"],
+                "tier2_exemplar": t2["exemplar"],
+                "tier2_confidence": t2["confidence"],
+                "tier2_margin": t2["margin"],
+                "tier2_would_act": t2["would_act"],
+                "encoder": t2["encoder"],
+            })
+            if (mode == "enabled" and t2["would_act"]
+                    and t2["intent"] in CLARIFY_OPTIONS):
+                return {
+                    "question": (f"\u201c{t[:140]}\u201d — resolved to "
+                                 f"{CLARIFY_OPTIONS[t2['intent']][0]}."),
+                    "options": options,
+                    "auto_pick": t2["intent"],
+                    "tier2": {"intent": t2["intent"],
+                              "exemplar": t2["exemplar"],
+                              "confidence": t2["confidence"],
+                              "margin": t2["margin"]},
+                }
     return {
         "question": f"\u201c{t[:140]}\u201d could mean a few things — which did you want?",
         "options": options,
@@ -1077,7 +1121,7 @@ def analyze(text: str) -> Dict[str, Any]:
         conf = task.get("confidence", 0)
     elif primary != "resolve":
         conf = scores.get(primary, {}).get("confidence", 0)
-    return {
+    out = {
         "is_task": task is not None,
         "primary": primary,
         "confidence": conf,
@@ -1100,3 +1144,16 @@ def analyze(text: str) -> Dict[str, Any]:
         "clarification": suggest_clarification(t, task),
         "task": task,
     }
+    # Tier 2 explainability (design doc §8): when the semantic tier is on,
+    # the debug panel shows what it WOULD decide for this request, so the
+    # Rule Engine page can audit shadow decisions without digging into the
+    # shadow log. resolve() is lru_cached, so this costs nothing extra when
+    # suggest_clarification above already computed it.
+    if engine_settings.semantic_tier_mode() != "off":
+        from . import semantic
+        try:
+            out["tier2"] = semantic.resolve(t, task)
+        except Exception as exc:
+            logger.warning("tier2 resolve failed: %s", exc)
+            out["tier2"] = None
+    return out
