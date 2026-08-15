@@ -23,7 +23,7 @@ Settings:
 import json
 import os
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from . import config
 

@@ -112,6 +112,7 @@ export default function RuleEnginePage() {
   // threshold and any future tunable knobs.
   const [settings, setSettings] = useState(null)
   const [settingsDraft, setSettingsDraft] = useState('')
+  const [modeDraft, setModeDraft] = useState('off')
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [settingsMsg, setSettingsMsg] = useState(null)
 
@@ -147,6 +148,7 @@ export default function RuleEnginePage() {
         setSettings(d)
         const th = d.settings?.decisive_match_threshold
         setSettingsDraft(th?.value != null ? String(th.value) : '')
+        setModeDraft(d.settings?.semantic_tier_mode?.value ?? 'off')
       })
       .catch(() => { /* non-critical */ })
   }, [])
@@ -179,7 +181,31 @@ export default function RuleEnginePage() {
       const d = await api.resetSettings()
       setSettings(d)
       setSettingsDraft(String(d.settings?.decisive_match_threshold?.value))
+      setModeDraft(d.settings?.semantic_tier_mode?.value ?? 'off')
       setSettingsMsg({ kind: 'info', text: 'Reset — every knob is back on its built-in default.' })
+    } catch (e) {
+      setSettingsMsg({ kind: 'error', text: String(e.message || e) })
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
+
+  async function saveModeKnob() {
+    const mode = String(modeDraft || '').trim()
+    if (!['off', 'shadow', 'enabled'].includes(mode)) {
+      setSettingsMsg({ kind: 'error', text: 'Mode must be one of: off, shadow, enabled.' })
+      return
+    }
+    setSettingsSaving(true)
+    setSettingsMsg(null)
+    try {
+      const d = await api.saveSettings({ semantic_tier_mode: mode })
+      setSettings(d)
+      setModeDraft(d.settings?.semantic_tier_mode?.value ?? 'off')
+      setSettingsMsg({
+        kind: 'success',
+        text: `Saved — Tier 2 is now in ${mode} mode.`,
+      })
     } catch (e) {
       setSettingsMsg({ kind: 'error', text: String(e.message || e) })
     } finally {
@@ -710,6 +736,56 @@ export default function RuleEnginePage() {
                 </p>
               ) : (
                 <div className="space-y-4">
+                  {settings.settings?.semantic_tier_mode && (
+                    <div className="rounded-xl border border-outline-variant bg-surface-container-low p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-bold text-on-surface">
+                            Semantic intent tier (Tier 2)
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-on-surface-variant">
+                            Local-embedding fallback for requests that would hit the
+                            clarification card. <b>off</b> = never runs (default) ·{' '}
+                            <b>shadow</b> = decides in the background and logs to{' '}
+                            <code className="font-mono">data/tier2_shadow.jsonl</code>{' '}
+                            without acting · <b>enabled</b> = a confident Tier-2 winner
+                            auto-picks its intent instead of asking.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={modeDraft}
+                            onChange={(e) => setModeDraft(e.target.value)}
+                            title="off | shadow | enabled"
+                            className="rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2 font-plex text-[13px] font-bold text-on-surface shadow-sm outline-none transition-all focus:border-primary focus:ring-4 focus:ring-primary-container"
+                          >
+                            <option value="off">off</option>
+                            <option value="shadow">shadow</option>
+                            <option value="enabled">enabled</option>
+                          </select>
+                          <button
+                            onClick={saveModeKnob}
+                            disabled={settingsSaving}
+                            className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 font-plex text-[12px] font-bold text-on-primary shadow-sm transition-all hover:opacity-90 active:scale-95 disabled:opacity-40"
+                          >
+                            <span className="msi text-[16px]">{settingsSaving ? 'hourglass_top' : 'save'}</span>
+                            {settingsSaving ? 'Saving…' : 'Save & apply'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-surface-container-high px-2.5 py-0.5 font-plex text-[10px] font-bold text-on-surface-variant">
+                          current: <b className="text-primary">{settings.settings.semantic_tier_mode.value}</b>
+                        </span>
+                        <span className="rounded-full bg-surface-container-high px-2.5 py-0.5 font-plex text-[10px] font-bold text-on-surface-variant">
+                          default: {settings.settings.semantic_tier_mode.default}
+                        </span>
+                        <span className="rounded-full bg-surface-container-high px-2.5 py-0.5 font-plex text-[10px] font-bold text-on-surface-variant">
+                          source: {settings.settings.semantic_tier_mode.source}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   {settings.settings?.decisive_match_threshold && (
                     <div className="rounded-xl border border-outline-variant bg-surface-container-low p-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">

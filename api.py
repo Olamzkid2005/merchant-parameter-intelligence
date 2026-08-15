@@ -1233,6 +1233,9 @@ def update_intent(req: IntentUpdateRequest):
 class SettingsUpdateRequest(BaseModel):
     decisive_match_threshold: Optional[float] = Field(
         None, ge=0.0, le=100.0)
+    # Tier-2 semantic rollout state: "off" | "shadow" | "enabled"
+    # (validated in the handler — same choices as settings._MODE_SPEC).
+    semantic_tier_mode: Optional[str] = None
 
 
 @app.get("/api/settings")
@@ -1264,6 +1267,12 @@ def update_settings(req: SettingsUpdateRequest):
     current = engine_settings.load()
     if req.decisive_match_threshold is not None:
         current["decisive_match_threshold"] = req.decisive_match_threshold
+    if req.semantic_tier_mode is not None:
+        if req.semantic_tier_mode not in ("off", "shadow", "enabled"):
+            raise HTTPException(
+                status_code=400,
+                detail="semantic_tier_mode must be one of: off, shadow, enabled")
+        current["semantic_tier_mode"] = req.semantic_tier_mode
     engine_settings.save(current)
     return {
         "ok": True,

@@ -34,6 +34,13 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Windows consoles default to cp1252, which cannot encode the ✅/⚠ markers
+# used in the report — force UTF-8 output so the script runs anywhere.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass
+
 from merchant_intelligence.intent_golden import INTENT_GOLDEN, intents_covered
 from merchant_intelligence.tasks import analyze
 from merchant_intelligence.tasks import semantic as tier2
