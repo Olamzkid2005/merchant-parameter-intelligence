@@ -41,9 +41,13 @@ logger = logging.getLogger(__name__)
 # compare() per-field table so the ordering can never drift).
 FIELD_PRIORITY = ["email", "phone", "tid", "mxcode", "payable_code",
                   "merchant_id", "account_number", "account_name",
-                  "contact_name", "contact_title", "bank", "address",
-                  "state", "terminal_serial", "slip_header",
-                  "onboarded_date"]
+                  "contact_name", "contact_title", "bank", "bank_code",
+                  "address", "lga", "state", "terminal_serial",
+                  "terminal_owner_code", "slip_header", "slip_footer",
+                  "settlement_type", "acquirer", "acquirer_id",
+                  "merchant_category_code", "business_occupation_code",
+                  "tin", "mtn_serial", "sim9mobile_serial",
+                  "deployment_date", "onboarded_date"]
 
 # Fields we aggregate into the identity section. Each entry is
 # (db_column, human label, normaliser, icon name for the frontend).
@@ -62,9 +66,22 @@ IDENTITY_FIELDS = [
     # bank codes resolve to names via config.bank_name (070 → Fidelity Bank),
     # so the UI never shows bare NIBSS codes as if they were bank names.
     ("bank", "Banks", lambda v: config.bank_name(v).upper(), "account_balance"),
+    ("bank_code", "Bank Codes", None, "account_balance"),
     ("state", "States", None, "map"),
+    ("lga", "LGA", None, "map"),
     ("terminal_serial", "Terminal Serials", normalize_code, "memory"),
+    ("terminal_owner_code", "Terminal Owners", None, "memory"),
     ("slip_header", "Slip Headers", None, "receipt_long"),
+    ("slip_footer", "Slip Footers", None, "receipt_long"),
+    ("settlement_type", "Settlement", None, "payments"),
+    ("acquirer", "Acquirers", None, "domain"),
+    ("acquirer_id", "Acquirer IDs", normalize_code, "domain"),
+    ("merchant_category_code", "MCC", None, "category"),
+    ("business_occupation_code", "Occupation Codes", None, "category"),
+    ("tin", "TIN", None, "badge"),
+    ("mtn_serial", "MTN Serials", None, "sim_card"),
+    ("sim9mobile_serial", "9Mobile Serials", None, "sim_card"),
+    ("deployment_date", "Deployed", None, "event"),
     # When the merchant was onboarded (the MONTH OF REQUEST / DATE CREATED
     # columns). Earliest date first so the profile shows when the merchant
     # first entered the registry.

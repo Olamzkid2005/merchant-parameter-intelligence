@@ -24,6 +24,10 @@ SEARCHABLE_COLUMNS = [
     "contact_name", "account_name", "alias", "mxcode",
     "payable_code", "tid", "terminal_serial", "remarks",
     "account_number", "merchant_id",
+    "merchant_category_code", "business_occupation_code",
+    "terminal_owner_code", "settlement_type", "acquirer", "acquirer_id",
+    "lga", "slip_footer", "tin", "mtn_serial", "sim9mobile_serial",
+    "deployment_date", "bank_code",
 ]
 
 

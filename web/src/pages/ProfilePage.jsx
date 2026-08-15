@@ -10,13 +10,15 @@ import { rowTsv, rowsCsv, copyTextToClipboard, useCopyIndicator } from '../utils
 
 /* ── Linked-records table shape ────────────────────────────────────────── */
 const MEMBER_HEADERS = [
-  'Merchant Name', 'TID', 'MX Code', 'Email', 'Phone', 'Account Name',
-  'Slip Header', 'Contact', 'Address', 'Merchant ID', 'Payable Code',
-  'Onboarded', 'Sheet', 'Linked By',
+  'Merchant Name', 'TID', 'MX Code', 'Email', 'Bank', 'State', 'MCC',
+  'Settlement', 'LGA', 'Phone', 'Account Name', 'Slip Header', 'Contact',
+  'Address', 'Merchant ID', 'Payable Code', 'Onboarded', 'Sheet', 'Linked By',
 ]
 function memberCell(r, h) {
   const map = {
     'Merchant Name': r.merchant_name, TID: r.tid, 'MX Code': r.mxcode, Email: r.email,
+    Bank: r.bank, State: r.state, MCC: r.merchant_category_code,
+    Settlement: r.settlement_type, LGA: r.lga,
     Phone: r.phone, 'Account Name': r.account_name, 'Slip Header': r.slip_header,
     Contact: r.contact_name, Address: r.address, 'Merchant ID': r.merchant_id,
     'Payable Code': r.payable_code, Onboarded: r.onboarded_date, Sheet: r.sheet_name,
@@ -129,7 +131,7 @@ function MemberRow({ m, index, copiedKey, onCopyRow }) {
             setOpen(!open)
           }
         }}
-        className="grid w-full cursor-pointer grid-cols-[1.6fr_150px_110px_130px_1.1fr_32px] items-center gap-3 px-6 py-4 text-left hover:bg-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="grid w-full cursor-pointer grid-cols-[1.4fr_120px_105px_120px_1fr_70px_55px_85px_80px_1fr_32px] items-center gap-3 px-6 py-4 text-left hover:bg-primary/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         <span className="truncate font-bold text-on-surface">{m.merchant_name || '—'}</span>
         <span className="font-mono text-xs text-outline">{m.tid || '—'}</span>
@@ -141,6 +143,11 @@ function MemberRow({ m, index, copiedKey, onCopyRow }) {
           <span className="truncate text-xs font-medium text-on-surface">{m.email || '—'}</span>
           <CopyButton value={m.email} label="email" />
         </span>
+        <span className="truncate text-xs text-on-surface-variant" title={m.bank || ''}>{m.bank || '—'}</span>
+        <span className="truncate text-xs text-on-surface-variant">{m.state || '—'}</span>
+        <span className="font-mono text-[11px] text-on-surface-variant">{m.merchant_category_code || '—'}</span>
+        <span className="truncate text-xs text-on-surface-variant">{m.settlement_type || '—'}</span>
+        <span className="truncate text-xs text-on-surface-variant">{m.lga || '—'}</span>
         <span className="flex flex-wrap items-center gap-1">
           {m.link_reasons?.length > 0 ? (
             m.link_reasons.slice(0, 2).map((r, i) => (
@@ -189,6 +196,11 @@ function MemberRow({ m, index, copiedKey, onCopyRow }) {
             ['Contact', m.contact_name],
             ['Phone', m.phone],
             ['Address', m.address],
+            ['Bank', m.bank],
+            ['State', m.state],
+            ['MCC', m.merchant_category_code],
+            ['Settlement', m.settlement_type],
+            ['LGA', m.lga],
             ['Merchant ID', m.merchant_id],
             ['Payable Code', m.payable_code],
             ['Onboarded', m.onboarded_date],
@@ -917,13 +929,17 @@ export default function ProfilePage({ onOpenGraph }) {
                       <span className="msi text-[16px]">{copied === 'all' ? 'check' : 'content_copy'}</span>
                       {copied === 'all' ? 'Copied!' : 'Copy all'}
                     </button>
-                  </div>
-                  <div className="animate-fade-in-up overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
-                    <div className="grid grid-cols-[1.6fr_150px_110px_130px_1.1fr_32px] gap-3 border-b border-outline-variant bg-surface-container px-6 py-4 font-plex text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
+                  </div>                    <div className="animate-fade-in-up overflow-x-auto rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
+                    <div className="grid grid-cols-[1.4fr_120px_105px_120px_1fr_70px_55px_85px_80px_1fr_32px] gap-3 border-b border-outline-variant bg-surface-container px-6 py-4 font-plex text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant">
                       <span>Merchant Name</span>
                       <span>TID</span>
                       <span>MX Code</span>
                       <span>Email</span>
+                      <span>Bank</span>
+                      <span>State</span>
+                      <span>MCC</span>
+                      <span>Settlement</span>
+                      <span>LGA</span>
                       <span>Linked By</span>
                       <span className="text-right"></span>
                     </div>

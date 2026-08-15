@@ -100,7 +100,11 @@ COLUMN_MAP_RULES = {
     "address": [
         "address", "physical addr", "physicaladdr", "physical_addr",
         "merchantphysicaladdr", "merchant address", "terminal address",
-        "location", "street", "city", "town", "lga", "local government",
+        "location", "street", "city", "town",
+    ],
+    "lga": [
+        "lga", "lcda", "lga/lcda", "local government",
+        "local government area",
     ],
     "contact_name": [
         "contact name", "contact_name", "contactname",
@@ -128,18 +132,56 @@ COLUMN_MAP_RULES = {
         "bank acc", "old bank acc", "new bank acc",
     ],
     "bank": [
-        "bank", "bank name", "financial institution", "bank code",
-        "bankcode", "bank_code",
+        "bank", "bank name", "financial institution",
+    ],
+    "bank_code": [
+        "bank code", "bankcode", "bank_code",
         # Change-of-details blocks: OLD BANK CODE / NEW BANK CODE are NIBSS
-        # bank codes (e.g. 057 -> NEW). "old bank code" / "new bank code"
-        # fragments resolve here.
+        # bank codes (e.g. 057 -> NEW).
         "old bank code", "new bank code",
     ],
     "state": [
-        "state", "state code", "state_code", "statecode",
+        "state",
     ],
     "state_code": [
         "state code", "state_code", "statecode",
+    ],
+    "merchant_category_code": [
+        "merchant category code", "merchantcategorycode", "merchant category",
+    ],
+    "business_occupation_code": [
+        "business occupation code", "businessoccupationcode",
+        "occupation code",
+    ],
+    "terminal_owner_code": [
+        "terminal owner code", "terminalownercode", "terminal owner",
+    ],
+    "settlement_type": [
+        "settlement type", "settlementtype",
+    ],
+    "acquirer": [
+        "acquirer", "acquirer name",
+    ],
+    "acquirer_id": [
+        "acquirer id", "acquirerid", "merchant acquirer id",
+        "visa acquirer id number", "verve acquirer id number",
+        "mastercard acquirer id number", "merchantacquirerid",
+    ],
+    "slip_footer": [
+        "slip footer", "slipfooter",
+    ],
+    "tin": [
+        "tin", "tax id", "tax identification", "taxid",
+    ],
+    "mtn_serial": [
+        "mtn serial", "mtnserial",
+    ],
+    "sim9mobile_serial": [
+        "9mobile serial", "9mobile", "9mobileserial",
+        "sim serial", "simserial",
+    ],
+    "deployment_date": [
+        "deployment date", "deploymentdate",
     ],
     "bvn": [
         "bvn", "bank verification number",
@@ -191,6 +233,9 @@ COLUMN_EXCLUDES = {
     "fee",                  # PTSP_fee / settlement fees — a rate, not a ptsp
     "ptsp fee",
     "settlement bank fee",
+    # ETT sheet: "Amount_to_Acquirer" is a fee RATE (0.0155), not the
+    # acquirer name — must not land in the acquirer field.
+    "amount to acquirer",
 }
 
 # Concatenated/camelCase headers observed across the workbooks (NIBSS FORMAT,
@@ -233,6 +278,14 @@ _KNOWN_SPLITS = {
     "newmerchantacctdomicilebankcode": "new merchant acct domicile bank code",
     "terminalmodeldescription": "terminal model description", "appname": "app name",
     "appversion": "app version", "statecode": "state code", "postcode": "post code",
+    "merchantcategorycode": "merchant category code",
+    "businessoccupationcode": "business occupation code",
+    "terminalownercode": "terminal owner code",
+    "settlementtype": "settlement type",
+    "merchantacquirerid": "merchant acquirer id",
+    "slipfooter": "slip footer", "taxid": "tax id",
+    "mtnserial": "mtn serial", "9mobileserial": "9mobile serial",
+    "deploymentdate": "deployment date", "lga/lcda": "lga/lcda",
     "device sn": "devicesn", "devicename": "device name", "devicetype": "device type",
     "bank account number": "bank acc no", "bank account": "bank acc no",
     "account number": "bank acc no", "new account number": "new bank acc no",
@@ -582,7 +635,20 @@ CREATE TABLE IF NOT EXISTS merchants (
     remarks           TEXT,
     raw_data          TEXT,
     imported_at       TEXT,
-    onboarded_date    TEXT
+    onboarded_date    TEXT,
+    merchant_category_code  TEXT,
+    business_occupation_code TEXT,
+    terminal_owner_code     TEXT,
+    settlement_type         TEXT,
+    acquirer                TEXT,
+    acquirer_id             TEXT,
+    lga                     TEXT,
+    slip_footer             TEXT,
+    tin                     TEXT,
+    mtn_serial              TEXT,
+    sim9mobile_serial       TEXT,
+    deployment_date         TEXT,
+    bank_code               TEXT
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS merchants_fts USING fts5(
@@ -598,6 +664,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS merchants_fts USING fts5(
     payable_code,
     account_name,
     merchant_id,
+    merchant_category_code,
+    business_occupation_code,
+    terminal_owner_code,
+    settlement_type,
+    acquirer,
+    acquirer_id,
+    lga,
+    slip_footer,
+    tin,
+    mtn_serial,
+    sim9mobile_serial,
+    deployment_date,
+    bank_code,
     tokenize='porter unicode61'
 );
 
@@ -614,6 +693,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS merchants_fts_trigram USING fts5(
     payable_code,
     account_name,
     merchant_id,
+    merchant_category_code,
+    business_occupation_code,
+    terminal_owner_code,
+    settlement_type,
+    acquirer,
+    acquirer_id,
+    lga,
+    slip_footer,
+    tin,
+    mtn_serial,
+    sim9mobile_serial,
+    deployment_date,
+    bank_code,
     tokenize='trigram'
 );
 
@@ -820,6 +912,19 @@ def build_merchant_search_db():
                 rec["raw_data"],
                 rec["imported_at"],
                 rec.get("onboarded_date", ""),
+                rec.get("merchant_category_code", ""),
+                rec.get("business_occupation_code", ""),
+                rec.get("terminal_owner_code", ""),
+                rec.get("settlement_type", ""),
+                rec.get("acquirer", ""),
+                rec.get("acquirer_id", ""),
+                rec.get("lga", ""),
+                rec.get("slip_footer", ""),
+                rec.get("tin", ""),
+                rec.get("mtn_serial", ""),
+                rec.get("sim9mobile_serial", ""),
+                rec.get("deployment_date", ""),
+                rec.get("bank_code", ""),
             )
 
             batch.append((next_id, row_tuple))
@@ -844,14 +949,21 @@ def build_merchant_search_db():
     fts_c = conn.cursor()
     fts_insert_count = 0
     trigram_insert_count = 0
-    for row_num, (mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi) in fts_rows_data:
+    for row_num, (mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi,
+                  mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns,
+                  sims, depd, bcode) in fts_rows_data:
         try:
             fts_c.execute(
                 """INSERT INTO merchants_fts(rowid, merchant_name, slip_header, alias,
                    email, phone, address, contact_name, tid, mxcode, payable_code,
-                   account_name, merchant_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (row_num, mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi)
+                   account_name, merchant_id, merchant_category_code,
+                   business_occupation_code, terminal_owner_code, settlement_type,
+                   acquirer, acquirer_id, lga, slip_footer, tin, mtn_serial,
+                   sim9mobile_serial, deployment_date, bank_code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (row_num, mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi,
+                 mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns, sims,
+                 depd, bcode)
             )
             fts_insert_count += 1
         except sqlite3.IntegrityError:
@@ -861,9 +973,15 @@ def build_merchant_search_db():
             fts_c.execute(
                 """INSERT OR IGNORE INTO merchants_fts_trigram(rowid, merchant_name,
                    slip_header, alias, email, phone, address, contact_name, tid,
-                   mxcode, payable_code, account_name, merchant_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (row_num, mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi)
+                   mxcode, payable_code, account_name, merchant_id,
+                   merchant_category_code, business_occupation_code,
+                   terminal_owner_code, settlement_type, acquirer, acquirer_id,
+                   lga, slip_footer, tin, mtn_serial, sim9mobile_serial,
+                   deployment_date, bank_code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (row_num, mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi,
+                 mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns, sims,
+                 depd, bcode)
             )
             trigram_insert_count += 1
         except sqlite3.IntegrityError:
@@ -887,6 +1005,12 @@ def build_merchant_search_db():
     logger.info("  POST-PROCESSING: Repairing numeric merchant_names")
     logger.info("=" * 70)
     _repair_code_names(conn)
+
+    # ── Post-processing: Resolve bank/state codes to human names ────────
+    logger.info("\n" + "=" * 70)
+    logger.info("  POST-PROCESSING: Resolving bank/state codes to names")
+    logger.info("=" * 70)
+    _resolve_code_names(conn)
 
     # ── Normalized name buckets (instant exact-normalized lookup) ────────
     logger.info("\n" + "=" * 70)
@@ -928,8 +1052,13 @@ def _flush_batch(conn, batch_with_ids, fts_rows_data):
                 contact_name, contact_title, account_name, account_number,
                 bank, state, state_code, bvn,
                 ptsp, terminal_type, deployment_status, alias,
-                static_acc_no, remarks, raw_data, imported_at, onboarded_date
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                static_acc_no, remarks, raw_data, imported_at, onboarded_date,
+                merchant_category_code, business_occupation_code,
+                terminal_owner_code, settlement_type, acquirer, acquirer_id,
+                lga, slip_footer, tin, mtn_serial, sim9mobile_serial,
+                deployment_date, bank_code
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                     ?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, row)
 
         # Collect FTS data for this row
@@ -939,7 +1068,11 @@ def _flush_batch(conn, batch_with_ids, fts_rows_data):
         # 12=contact_name,13=contact_title,14=account_name,15=account_number,
         # 16=bank,17=state,18=state_code,19=bvn,
         # 20=ptsp,21=terminal_type,22=deployment_status,23=alias,
-        # 24=static_acc_no,25=remarks,26=raw_data,27=imported_at
+        # 24=static_acc_no,25=remarks,26=raw_data,27=imported_at,
+        # 28=onboarded_date, 29=merchant_category_code, 30=business_occupation_code,
+        # 31=terminal_owner_code, 32=settlement_type, 33=acquirer, 34=acquirer_id,
+        # 35=lga, 36=slip_footer, 37=tin, 38=mtn_serial, 39=sim9mobile_serial,
+        # 40=deployment_date, 41=bank_code
         fts_data = (
             row[2],  # merchant_name
             row[8],  # slip_header
@@ -953,11 +1086,69 @@ def _flush_batch(conn, batch_with_ids, fts_rows_data):
             row[5],  # payable_code
             row[14], # account_name
             row[3],  # merchant_id
+            row[29], row[30], row[31], row[32], row[33], row[34],
+            row[35], row[36], row[37], row[38], row[39], row[40], row[41],
         )
         fts_rows_data.append((row_id, fts_data))
 
     conn.commit()
     return len(batch_with_ids)
+
+
+# Nigerian state codes (as stored in the STATE CODE columns) → full names.
+# Mirrors the "State Code" sheet in the 2ISW workbook; used by
+# _resolve_code_names so the profile shows "LAGOS" instead of "LA".
+NG_STATE_NAMES = {
+    "AB": "ABIA", "AD": "ADAMAWA", "AK": "AKWA IBOM", "AN": "ANAMBRA",
+    "BA": "BAUCHI", "BE": "BENUE", "BO": "BORNO", "BY": "BAYELSA",
+    "CR": "CROSS RIVER", "DE": "DELTA", "EB": "EBONYI", "ED": "EDO",
+    "EK": "EKITI", "EN": "ENUGU", "FC": "FCT ABUJA", "GO": "GOMBE",
+    "IM": "IMO", "JI": "JIGAWA", "KD": "KADUNA", "KN": "KANO",
+    "KT": "KATSINA", "KB": "KEBBI", "KO": "KOGI", "KW": "KWARA",
+    "LA": "LAGOS", "NA": "NASARAWA", "NI": "NIGER", "OG": "OGUN",
+    "ON": "ONDO", "OS": "OSUN", "OY": "OYO", "PL": "PLATEAU",
+    "RI": "RIVERS", "SO": "SOKOTO", "TA": "TARABA", "YO": "YOBE",
+    "ZA": "ZAMFARA",
+}
+
+
+def _resolve_code_names(conn) -> None:
+    """Resolve stored codes to human-readable names after insert.
+
+    1. bank_code (NIBSS code 214) → bank ("First City Monument Bank (FCMB)")
+       via config.bank_name — so the UI shows real bank names, never bare codes.
+    2. state_code (2-letter LA) → state ("LAGOS") via the NG_STATE_NAMES map,
+       and drop the leftover code so "States" shows the real name.
+
+    Runs post-insert in both build scripts (rebuild_db + build_intelligence_db).
+    """
+    c = conn.cursor()
+    # 1. Bank codes → names
+    c.execute("SELECT id, bank_code, bank FROM merchants "
+              "WHERE bank_code != '' AND bank_code IS NOT NULL "
+              "AND bank_code GLOB '*[0-9]*'")
+    rows = c.fetchall()
+    fixed = 0
+    for rid, code, bank in rows:
+        name = config.bank_name(code)
+        if name and name != code:
+            c.execute("UPDATE merchants SET bank = ? WHERE id = ?", (name, rid))
+            fixed += 1
+    # 2. State codes → names (only when state is still empty so a real
+    #    state name already captured is never clobbered)
+    c.execute("SELECT id, state_code, state FROM merchants "
+              "WHERE state_code != '' AND state_code IS NOT NULL "
+              "AND (state = '' OR state IS NULL)")
+    rows = c.fetchall()
+    fixed_state = 0
+    for rid, code, state in rows:
+        name = NG_STATE_NAMES.get(str(code).strip().upper())
+        if name:
+            c.execute("UPDATE merchants SET state = ? WHERE id = ?", (name, rid))
+            fixed_state += 1
+    conn.commit()
+    if fixed or fixed_state:
+        logger.info(f"  \u2705 Resolved {fixed:,} bank codes and {fixed_state:,} state codes to names")
 
 
 def _repair_code_names(conn):
@@ -992,7 +1183,11 @@ def _repair_code_names(conn):
     #    will no longer match after merchant_name is changed)
     c.execute("""
         SELECT id, merchant_name, slip_header, alias, email, phone, address,
-               contact_name, tid, mxcode, payable_code, account_name, merchant_id
+               contact_name, tid, mxcode, payable_code, account_name, merchant_id,
+               merchant_category_code, business_occupation_code,
+               terminal_owner_code, settlement_type, acquirer, acquirer_id,
+               lga, slip_footer, tin, mtn_serial, sim9mobile_serial,
+               deployment_date, bank_code
         FROM merchants
         WHERE slip_header != ''
           AND slip_header GLOB '*[A-Za-z]*'
@@ -1022,49 +1217,47 @@ def _repair_code_names(conn):
     fts_updated = 0
     for row in fixed_rows:
         row_id, _, slip, alias, email, phone, address, contact_name, tid, mxcode, \
-            payable_code, account_name, merchant_id = row
+            payable_code, account_name, merchant_id, \
+            mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns, sims, depd, bcode = row
         try:
+            # FTS5 virtual tables reject UPSERT (ON CONFLICT) — DELETE then
+            # INSERT is the supported replace pattern.
+            conn.execute("DELETE FROM merchants_fts WHERE rowid = ?", (row_id,))
             conn.execute(
                 """INSERT INTO merchants_fts(rowid, merchant_name, slip_header, alias,
                    email, phone, address, contact_name, tid, mxcode, payable_code,
-                   account_name, merchant_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(rowid) DO UPDATE SET
-                       merchant_name=excluded.merchant_name""",
+                   account_name, merchant_id, merchant_category_code,
+                   business_occupation_code, terminal_owner_code, settlement_type,
+                   acquirer, acquirer_id, lga, slip_footer, tin, mtn_serial,
+                   sim9mobile_serial, deployment_date, bank_code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (row_id, slip, slip, alias, email, phone, address, contact_name,
-                 tid, mxcode, payable_code, account_name, merchant_id)
+                 tid, mxcode, payable_code, account_name, merchant_id,
+                 mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns, sims,
+                 depd, bcode)
             )
             # Keep the trigram index in sync too
             conn.execute("DELETE FROM merchants_fts_trigram WHERE rowid = ?", (row_id,))
             conn.execute(
                 """INSERT INTO merchants_fts_trigram(rowid, merchant_name,
                    slip_header, alias, email, phone, address, contact_name, tid,
-                   mxcode, payable_code, account_name, merchant_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   mxcode, payable_code, account_name, merchant_id,
+                   merchant_category_code, business_occupation_code,
+                   terminal_owner_code, settlement_type, acquirer, acquirer_id,
+                   lga, slip_footer, tin, mtn_serial, sim9mobile_serial,
+                   deployment_date, bank_code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (row_id, slip, slip, alias, email, phone, address, contact_name,
-                 tid, mxcode, payable_code, account_name, merchant_id)
+                 tid, mxcode, payable_code, account_name, merchant_id,
+                 mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns, sims,
+                 depd, bcode)
             )
             fts_updated += 1
-        except sqlite3.OperationalError:
-            conn.execute("DELETE FROM merchants_fts WHERE rowid = ?", (row_id,))
-            conn.execute(
-                """INSERT INTO merchants_fts(rowid, merchant_name, slip_header, alias,
-                   email, phone, address, contact_name, tid, mxcode, payable_code,
-                   account_name, merchant_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (row_id, slip, slip, alias, email, phone, address, contact_name,
-                 tid, mxcode, payable_code, account_name, merchant_id)
-            )
-            conn.execute("DELETE FROM merchants_fts_trigram WHERE rowid = ?", (row_id,))
-            conn.execute(
-                """INSERT INTO merchants_fts_trigram(rowid, merchant_name,
-                   slip_header, alias, email, phone, address, contact_name, tid,
-                   mxcode, payable_code, account_name, merchant_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (row_id, slip, slip, alias, email, phone, address, contact_name,
-                 tid, mxcode, payable_code, account_name, merchant_id)
-            )
-            fts_updated += 1
+        except sqlite3.Error:
+            # Row vanished or index race — skip; main FTS index was rebuilt
+            # from the master table, so a missing trigram row is recoverable
+            # on the next full rebuild.
+            pass
 
     conn.commit()
     logger.info(f"  ✅ FTS5 index updated for {fts_updated:,} rows")

@@ -58,14 +58,49 @@ def _looks_like_state(v: str) -> bool:
     return str(v).strip().upper() in _NG_STATE_NAMES
 from rebuild_db import (DB_SCHEMA_SQL, TID_PATTERN, _flush_batch,
                         _clean_pandas_leak, _is_real_name, _is_real_tid,
-                        _repair_code_names, _row_has_content, clean_date,
-                        clean_val, detect_all_header_rows, normalize_col_name,
+                        _repair_code_names, _resolve_code_names,
+                        _row_has_content, clean_date, clean_val,
+                        detect_all_header_rows, normalize_col_name,
                         read_multiblock)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 EXCEL_EXTENSIONS = (".xlsx", ".xlsm", ".xls")
+
+# Live build progress — written to data/build_progress.txt so the build can
+# be watched from outside (tail the file) and reported as it runs. A single
+# line is rewritten in place, so the file always holds the CURRENT state.
+PROGRESS_FILE = PROJECT_ROOT / "data" / "build_progress.txt"
+_last_progress = {"n": 0}
+
+
+def _report_progress(msg: str, force: bool = False) -> None:
+    """Print a \r progress line (flushed) and mirror it to the progress file.
+
+    force=True always writes (used for phase boundaries); otherwise the
+    line is throttled to ~10 updates/sec so fast sheets don't spam stdout.
+    """
+    _last_progress["n"] += 1
+    if not force and _last_progress["n"] % 10 != 0:
+        return
+    sys.stdout.write("\r" + msg + " " * 12 + "\r")
+    sys.stdout.flush()
+    try:
+        PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PROGRESS_FILE.write_text(msg, encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _clear_progress() -> None:
+    """Blank the progress line/file at the end of a build."""
+    sys.stdout.write("\r" + " " * 100 + "\r")
+    sys.stdout.flush()
+    try:
+        PROGRESS_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 # Derived/export files the app writes into the same folder (e.g. "Export to
 # Excel" downloads). They are NOT source data — ingesting them would create
@@ -366,7 +401,7 @@ def _refine_column_mapping(df, col_mapping: Dict[str, str]) -> None:
       it to merchant_name so the name becomes searchable.
     - When a sheet has a real street-address column (PHYSICAL ADDR), LGA/LCDA
       columns (a district name like "IBADAN") must NOT steal the address field
-      — they stay unmapped (raw_data only).
+      — they route to the dedicated lga field instead.
     """
     has_real_addr = any(
         col_mapping.get(c) == "address" and "physical addr" in str(c).lower()
@@ -393,8 +428,8 @@ def _refine_column_mapping(df, col_mapping: Dict[str, str]) -> None:
         low_hdr = str(raw_col).lower()
         if (has_real_addr and col_mapping.get(raw_col) == "address"
                 and ("lga" in low_hdr or "lcda" in low_hdr)):
-            # Keep the real street address; LGA/LCDA stays unmapped.
-            col_mapping[raw_col] = raw_col
+            # Keep the real street address; LGA/LCDA routes to the lga field.
+            col_mapping[raw_col] = "lga"
         # Headerless state column (e.g. Medplus.xlsx's trailing blank-headed
         # column holding LAGOS/ABIA/…). No header = no keyword match, so sniff
         # the values: if an otherwise-unmapped column is predominantly Nigerian
@@ -453,7 +488,11 @@ def build_intelligence_db(folder: Path, out_path: Path) -> bool:
     batch: List[Tuple[int, Tuple]] = []
     next_id = 1  # autoincrement counter (explicit so FTS rowids line up)
 
-    for file_path in excel_files:
+    files_total = len(excel_files)
+    for file_no, file_path in enumerate(excel_files, 1):
+        _report_progress(
+            f"[build] file {file_no}/{files_total}: {file_path.name} — reading…",
+            force=True)
         try:
             xls = pd.ExcelFile(str(file_path))
         except Exception as exc:
@@ -496,7 +535,13 @@ def build_intelligence_db(folder: Path, out_path: Path) -> bool:
                     break
 
             sheet_rows = 0
+            sheet_len = len(df)
             for idx, row in df.iterrows():
+                if sheet_rows % 250 == 0 and sheet_len:
+                    _report_progress(
+                        f"[build] {file_no}/{files_total} {file_path.name} :: "
+                        f"{sheet_name} — {sheet_rows:,}/{sheet_len:,} rows "
+                        f"({sheet_rows * 100 // sheet_len}%)")
                 rec: Dict[str, Any] = {
                     "sheet_name": f"{file_path.stem} :: {sheet_name}",
                     "row_number": header_offset + idx + 2,
@@ -591,6 +636,19 @@ def build_intelligence_db(folder: Path, out_path: Path) -> bool:
                     rec["raw_data"],
                     rec["imported_at"],
                     rec.get("onboarded_date", ""),
+                    rec.get("merchant_category_code", ""),
+                    rec.get("business_occupation_code", ""),
+                    rec.get("terminal_owner_code", ""),
+                    rec.get("settlement_type", ""),
+                    rec.get("acquirer", ""),
+                    rec.get("acquirer_id", ""),
+                    rec.get("lga", ""),
+                    rec.get("slip_footer", ""),
+                    rec.get("tin", ""),
+                    rec.get("mtn_serial", ""),
+                    rec.get("sim9mobile_serial", ""),
+                    rec.get("deployment_date", ""),
+                    rec.get("bank_code", ""),
                 )
 
                 batch.append((next_id, row_tuple))
@@ -610,24 +668,38 @@ def build_intelligence_db(folder: Path, out_path: Path) -> bool:
             logger.info(f"  [{file_path.name}] Total: {file_rows:,} rows")
         else:
             logger.info(f"  [{file_path.name}] (no data rows)")
+        _report_progress(
+            f"[build] file {file_no}/{files_total} done — {file_rows:,} rows "
+            f"(total so far: {total_rows + len(batch):,})",
+            force=True)
 
     if batch:
         total_rows += _flush_batch(conn, batch, fts_rows_data)
 
+    _report_progress(
+        f"[build] all {files_total} files read — {total_rows:,} rows, "
+        f"building indexes…", force=True)
     logger.info(f"\n  📊 Total rows inserted: {total_rows:,} across {files_ok} files")
 
     # Rebuild FTS indexes (porter + trigram) from collected data
     logger.info("\n  🔍 Rebuilding FTS5 index...")
     fts_count = 0
     trigram_count = 0
-    for row_num, (mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi) in fts_rows_data:
+    for row_num, (mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi,
+                  mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns,
+                  sims, depd, bcode) in fts_rows_data:
         try:
             c.execute(
                 """INSERT INTO merchants_fts(rowid, merchant_name, slip_header, alias,
                    email, phone, address, contact_name, tid, mxcode, payable_code,
-                   account_name, merchant_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (row_num, mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi)
+                   account_name, merchant_id, merchant_category_code,
+                   business_occupation_code, terminal_owner_code, settlement_type,
+                   acquirer, acquirer_id, lga, slip_footer, tin, mtn_serial,
+                   sim9mobile_serial, deployment_date, bank_code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (row_num, mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi,
+                 mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns, sims,
+                 depd, bcode)
             )
             fts_count += 1
         except sqlite3.IntegrityError:
@@ -636,9 +708,15 @@ def build_intelligence_db(folder: Path, out_path: Path) -> bool:
             c.execute(
                 """INSERT OR IGNORE INTO merchants_fts_trigram(rowid, merchant_name,
                    slip_header, alias, email, phone, address, contact_name, tid,
-                   mxcode, payable_code, account_name, merchant_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (row_num, mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi)
+                   mxcode, payable_code, account_name, merchant_id,
+                   merchant_category_code, business_occupation_code,
+                   terminal_owner_code, settlement_type, acquirer, acquirer_id,
+                   lga, slip_footer, tin, mtn_serial, sim9mobile_serial,
+                   deployment_date, bank_code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (row_num, mn, sh, al, em, ph, ad, cn, td, mx, pc, an, mi,
+                 mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns, sims,
+                 depd, bcode)
             )
             trigram_count += 1
         except sqlite3.IntegrityError:
@@ -662,6 +740,21 @@ def build_intelligence_db(folder: Path, out_path: Path) -> bool:
     logger.info("=" * 70)
     _repair_code_names(conn)
 
+    # NNPC aggregator placeholders ("Interswitch Limited/NNPC 68") -> the real
+    # dealer name captured in contact_name (DEALER NAME / CONTACTNAME columns).
+    logger.info("\n" + "=" * 70)
+    logger.info("  POST-PROCESSING: Recovering NNPC dealer names")
+    logger.info("=" * 70)
+    _repair_placeholder_names(conn)
+
+    # NNPC aggregator placeholders: after names are repaired, resolve
+    # bank/state codes to human-readable names (bank_code 214 → FCMB,
+    # state_code LA → LAGOS) so the profile never shows bare codes.
+    logger.info("\n" + "=" * 70)
+    logger.info("  POST-PROCESSING: Resolving bank/state codes to names")
+    logger.info("=" * 70)
+    _resolve_code_names(conn)
+
     # Normalized name buckets (instant exact-normalized lookup + autocomplete)
     logger.info("\n" + "=" * 70)
     logger.info("  POST-PROCESSING: Building normalized name buckets")
@@ -684,6 +777,7 @@ def build_intelligence_db(folder: Path, out_path: Path) -> bool:
 
     conn.close()
     logger.info(f"\n  ✅ intelligence.db built — {total_rows:,} records\n")
+    _clear_progress()
     return True
 
 
@@ -759,6 +853,118 @@ def watch_and_rebuild(folder: Path, out_path: Path, interval: float = 2.0,
         logger.info("\n\n  ⏹️  Watch stopped.\n")
 
 
+def _repair_placeholder_names(conn) -> None:
+    """Replace NNPC-master aggregator placeholders with the real dealer name.
+
+    The NNpc parameter master workbook writes the generic aggregator name
+    'Interswitch Limited/NNPC 68' into the MERCHANTNAME column while the real
+    trading name (e.g. 'ELEYELE SS', 'OSEMEDEMI TRADING COMPANY...') lives in
+    the DEALER NAME / CONTACTNAME columns (captured as contact_name). Rows
+    whose merchant_name is this placeholder get merchant_name = contact_name
+    when the contact is a real name — and the FTS5 indexes are synced so the
+    recovered names are searchable immediately.
+
+    Only the '/NNPC' aggregator form is repaired: the NIBSS/2ISW
+    'INTERSWITCH LIMITED 55' rows are legitimate BNPL collection accounts
+    (Interswitch IS the merchant there, and their contact is 'TOUCHPOINT
+    SUPPORT N'), so they are deliberately left untouched.
+    """
+    c = conn.cursor()
+    c.execute("""
+        SELECT COUNT(*) FROM merchants
+        WHERE UPPER(TRIM(merchant_name)) LIKE 'INTERSWITCH LIMITED/NNPC%'
+          AND contact_name != ''
+          AND UPPER(contact_name) NOT LIKE 'ISW-NNPC%'
+          AND UPPER(contact_name) NOT LIKE 'INTERSWITCH%'
+          AND UPPER(contact_name) NOT LIKE 'TOUCHPOINT%'
+          AND UPPER(contact_name) NOT LIKE '%NNPC DEALER%'
+    """)
+    fixable = c.fetchone()[0]
+    logger.info(f"\n  🔧 NNPC placeholder names with recoverable dealer name: {fixable:,}")
+    if fixable == 0:
+        logger.info("  ✅ Nothing to repair")
+        return
+
+    c.execute("""
+        SELECT id, merchant_name, contact_name, slip_header, alias, email,
+               phone, address, tid, mxcode, payable_code, account_name,
+               merchant_id, merchant_category_code, business_occupation_code,
+               terminal_owner_code, settlement_type, acquirer, acquirer_id,
+               lga, slip_footer, tin, mtn_serial, sim9mobile_serial,
+               deployment_date, bank_code
+        FROM merchants
+        WHERE UPPER(TRIM(merchant_name)) LIKE 'INTERSWITCH LIMITED/NNPC%'
+          AND contact_name != ''
+          AND UPPER(contact_name) NOT LIKE 'ISW-NNPC%'
+          AND UPPER(contact_name) NOT LIKE 'INTERSWITCH%'
+          AND UPPER(contact_name) NOT LIKE 'TOUCHPOINT%'
+          AND UPPER(contact_name) NOT LIKE '%NNPC DEALER%'
+    """)
+    rows = c.fetchall()
+    logger.info("  Examples (before fix):")
+    for r in rows[:5]:
+        logger.info(f"    id={r[0]}  name={r[1]!r}  ->  {r[2]!r}")
+
+    c.execute("""
+        UPDATE merchants
+        SET merchant_name = contact_name
+        WHERE UPPER(TRIM(merchant_name)) LIKE 'INTERSWITCH LIMITED/NNPC%'
+          AND contact_name != ''
+          AND UPPER(contact_name) NOT LIKE 'ISW-NNPC%'
+          AND UPPER(contact_name) NOT LIKE 'INTERSWITCH%'
+          AND UPPER(contact_name) NOT LIKE 'TOUCHPOINT%'
+          AND UPPER(contact_name) NOT LIKE '%NNPC DEALER%'
+    """)
+    updated = c.rowcount
+    conn.commit()
+    logger.info(f"  ✅ Replaced {updated:,} placeholder merchant_names with real dealer names")
+
+    logger.info("\n  🔍 Updating FTS5 indexes for repaired rows...")
+    fts_updated = 0
+    for r in rows:
+        row_id, _, new_name, slip, alias, email, phone, address, tid, mxcode, \
+            payable_code, account_name, merchant_id, \
+            mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns, sims, depd, \
+            bcode = r
+        try:
+            # FTS5 virtual tables reject UPSERT (ON CONFLICT) — DELETE then
+            # INSERT is the supported replace pattern (same as _repair_code_names).
+            conn.execute("DELETE FROM merchants_fts WHERE rowid = ?", (row_id,))
+            conn.execute(
+                """INSERT INTO merchants_fts(rowid, merchant_name, slip_header, alias,
+                   email, phone, address, contact_name, tid, mxcode, payable_code,
+                   account_name, merchant_id, merchant_category_code,
+                   business_occupation_code, terminal_owner_code, settlement_type,
+                   acquirer, acquirer_id, lga, slip_footer, tin, mtn_serial,
+                   sim9mobile_serial, deployment_date, bank_code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (row_id, new_name, slip, alias, email, phone, address, new_name,
+                 tid, mxcode, payable_code, account_name, merchant_id,
+                 mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns, sims,
+                 depd, bcode)
+            )
+            conn.execute("DELETE FROM merchants_fts_trigram WHERE rowid = ?", (row_id,))
+            conn.execute(
+                """INSERT INTO merchants_fts_trigram(rowid, merchant_name,
+                   slip_header, alias, email, phone, address, contact_name, tid,
+                   mxcode, payable_code, account_name, merchant_id,
+                   merchant_category_code, business_occupation_code,
+                   terminal_owner_code, settlement_type, acquirer, acquirer_id,
+                   lga, slip_footer, tin, mtn_serial, sim9mobile_serial,
+                   deployment_date, bank_code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (row_id, new_name, slip, alias, email, phone, address, new_name,
+                 tid, mxcode, payable_code, account_name, merchant_id,
+                 mcc, boc, toc, st, acq, acid, lga, sft, tin, mtns, sims,
+                 depd, bcode)
+            )
+            fts_updated += 1
+        except Exception as exc:
+            logger.warning(f"FTS sync failed for row {row_id}: {exc}")
+    conn.commit()
+    logger.info(f"  ✅ FTS indexes synced for {fts_updated:,} repaired rows")
+
+
 def verify_search(db_path: Optional[Path] = None) -> bool:
     """Smoke-test the newly built intelligence.db.
 
@@ -768,6 +974,7 @@ def verify_search(db_path: Optional[Path] = None) -> bool:
     of quietly succeeding.
     """
     from merchant_intelligence import MerchantSearch
+    import sqlite3 as _sq
 
     # Verify the ACTUAL database we just built (not just the default active_db)
     searcher = MerchantSearch(db_path=db_path)
@@ -835,6 +1042,38 @@ def verify_search(db_path: Optional[Path] = None) -> bool:
         )
         ok = False
 
+    # NNPC master sheet proof: the workbook stores the real dealer name in the
+    # DEALER NAME / CONTACTNAME columns while MERCHANTNAME holds the generic
+    # aggregator placeholder "Interswitch Limited/NNPC N". If the placeholder
+    # recovery ever regresses, searching a dealer that ONLY exists in this file
+    # (e.g. ELEYELE SS on MX184404) still finds the placeholder instead of the
+    # real name — so this check fails and the rebuild surfaces the bug.
+    logger.info("\n" + "-" * 70)
+    logger.info("  NNPC MASTER SHEET CHECK (dealer-name recovery)")
+    logger.info("-" * 70)
+    nm_conn = _sq.connect(str(db_path))
+    try:
+        nm = nm_conn.execute(
+            "SELECT merchant_name, contact_name, mxcode FROM merchants "
+            "WHERE UPPER(TRIM(mxcode)) = 'MX184404' LIMIT 3"
+        ).fetchall()
+        good = any(
+            str(r[0]).strip().upper() == "ELEYELE SS"
+            or ("ELEYELE" in str(r[0]).upper())
+            for r in nm
+        )
+        if good:
+            logger.info(f"  ✅ NNPC master OK — MX184404 → {nm[0][0]} "
+                        f"(contact: {nm[0][1]})")
+        else:
+            logger.error(
+                "  ❌ NNPC master check FAILED — MX184404 merchant_name is still "
+                "the generic placeholder (dealer-name recovery regressed)."
+            )
+            ok = False
+    finally:
+        nm_conn.close()
+
     # Change-of-details sheet proof: the sheet stacks many export blocks each
     # with its own header, so a mis-decoded block misaligns every column. A
     # merchant known to appear there (WHITEVILL HOTEL, MX45173) must resolve to
@@ -843,7 +1082,6 @@ def verify_search(db_path: Optional[Path] = None) -> bool:
     logger.info("\n" + "-" * 70)
     logger.info("  CHANGE-OF-DETAILS SHEET CHECK")
     logger.info("-" * 70)
-    import sqlite3 as _sq
     ch_conn = _sq.connect(str(db_path))
     try:
         ch = ch_conn.execute(
@@ -863,6 +1101,51 @@ def verify_search(db_path: Optional[Path] = None) -> bool:
             ok = False
     finally:
         ch_conn.close()
+
+    # Max-info proof: the new high-value columns (MCC, settlement type,
+    # terminal owner code, LGA, TIN, bank code, deployment date) must be
+    # populated for the sheets that carry them. If the column mapping ever
+    # regresses, these counts collapse to 0 and the rebuild surfaces it.
+    logger.info("\n" + "-" * 70)
+    logger.info("  MAX-INFO COLUMN CHECK (MCC / settlement / owner / LGA / TIN)")
+    logger.info("-" * 70)
+    mi_conn = _sq.connect(str(db_path))
+    try:
+        checks = [
+            ("merchant_category_code", "MCC (2ISW_Parameter)",
+             "SELECT COUNT(*) FROM merchants WHERE merchant_category_code != '' "
+             "AND sheet_name LIKE '2ISW_Parameter_File 5 :: 2ISW_Parameter%'"),
+            ("settlement_type", "Settlement type (Sameday)",
+             "SELECT COUNT(*) FROM merchants WHERE settlement_type != '' "
+             "AND sheet_name LIKE '%Sameday%'"),
+            ("terminal_owner_code", "Terminal owner code",
+             "SELECT COUNT(*) FROM merchants WHERE terminal_owner_code != ''"),
+            ("lga", "LGA/LCDA",
+             "SELECT COUNT(*) FROM merchants WHERE lga != ''"),
+            ("tin", "TIN (NIBSS/Ifis)",
+             "SELECT COUNT(*) FROM merchants WHERE tin != ''"),
+            ("bank_code", "Bank code",
+             "SELECT COUNT(*) FROM merchants WHERE bank_code != ''"),
+            ("mtn_serial", "MTN serial (Deployment)",
+             "SELECT COUNT(*) FROM merchants WHERE mtn_serial != ''"),
+            ("deployment_date", "Deployment date",
+             "SELECT COUNT(*) FROM merchants WHERE deployment_date != ''"),
+        ]
+        all_ok = True
+        for col, label, sql in checks:
+            n = mi_conn.execute(sql).fetchone()[0]
+            status = "✅" if n else "❌"
+            if not n:
+                all_ok = False
+            logger.info(f"  {status} {label:<34} {n:>7,} rows")
+        if not all_ok:
+            logger.error(
+                "  ❌ Max-info check FAILED — one or more high-value columns "
+                "loaded zero rows. Check the column-mapping rules."
+            )
+            ok = False
+    finally:
+        mi_conn.close()
     return ok
 
 
