@@ -1436,6 +1436,25 @@ def audit_endpoint(limit: int = 200, action: str = "", actor: str = ""):
     }
 
 
+@app.get("/api/ingest")
+def ingest_endpoint(limit: int = 20):
+    """Ingestion-run ledger + data-freshness signal (governed data platform
+    slice, docs/technical-review-2026-08-original.md #2).
+
+    Returns the most recent rebuild runs (append-only, stored in a dedicated
+    data/ingest_ledger.db that survives rebuilds) plus a freshness summary:
+    which Excel source files are NEW or CHANGED since the last good build.
+    """
+    from merchant_intelligence import ingest_ledger
+    return {
+        "ok": True,
+        "runs": ingest_ledger.recent(limit=max(1, min(200, int(limit)))),
+        "stats": ingest_ledger.stats(),
+        "freshness": ingest_ledger.freshness(),
+        "file": str(ingest_ledger._db_path()),
+    }
+
+
 @app.post("/api/task/analyze")
 def task_analyze(req: TaskRequest):
     """Intent-parser debug endpoint (v2): explain WHY a request was routed

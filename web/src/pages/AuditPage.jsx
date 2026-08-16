@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import IngestionLedgerCard from '../components/IngestionLedgerCard'
 
 export default function AuditPage() {
   const [data, setData] = useState(null)
@@ -65,6 +66,8 @@ export default function AuditPage() {
           {err}
         </p>
       )}
+
+      <IngestionLedgerCard />
 
       {data && (
         <div className="flex flex-wrap items-center gap-3">

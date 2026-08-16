@@ -144,6 +144,17 @@ handlers, one DB module per layer), so it is additive wiring, not rework.
 > behavior change until enabled; session username becomes the audit actor;
 > Login page + Rule Engine Access-control card; `tests/test_auth.py` 27
 > checks). Remaining: tenancy-ready user model + KMS-grade encryption.
+>
+> **Status (workstream 2 first slice shipped):** the ingestion-run ledger +
+> data-freshness signal — `merchant_intelligence/ingest_ledger.py` (append-only
+> `data/ingest_ledger.db` that survives merchant-DB rebuilds, INSERT-only
+> write path, source snapshot per run), recorded by `app.start rebuild` and
+> `build_intelligence_db.py` after every build, exposed as `GET /api/ingest`
+> (runs + stats + freshness: which Excel sources are NEW/CHANGED vs the last
+> good build), surfaced as the Data freshness & ingestion ledger card on the
+> Audit Trail page; `tests/test_ingest_ledger.py` 25 checks. This directly
+> addresses "Data freshness = somebody remembered to rebuild" — the app now
+> tells you when a dropped-in workbook hasn't been picked up.
 
 ## 5. Workstream 2 — Governed Data Platform & Real-Time Ingestion
 

@@ -1182,6 +1182,30 @@ def main():
     else:
         logger.info("  ✅ DONE — intelligence.db is ready. Restart the API to load it.")
     logger.info("=" * 70)
+
+    # Governed-data slice: append this run to the ingestion ledger (dedicated
+    # data/ingest_ledger.db, survives rebuilds) with the source snapshot so
+    # freshness can be computed later. Never breaks the build.
+    try:
+        from merchant_intelligence.ingest_ledger import record
+        row_count = 0
+        try:
+            import sqlite3 as _sqlite3
+            _c = _sqlite3.connect(str(args.out), timeout=10)
+            try:
+                row_count = int(_c.execute("SELECT COUNT(*) FROM merchants").fetchone()[0])
+            finally:
+                _c.close()
+        except Exception:  # noqa: BLE001
+            row_count = 0
+        record("build_intelligence_db",
+               "ok" if verified else "failed",
+               detail=f"build {'verified' if verified else 'verification failed'} via {args.folder.name}",
+               row_count=row_count,
+               sources=folder_snapshot(args.folder))
+    except Exception as _e:  # noqa: BLE001
+        logger.warning("ingest ledger record skipped: %s", _e)
+
     sys.exit(0 if verified else 1)
 
 

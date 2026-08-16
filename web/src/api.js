@@ -220,6 +220,11 @@ export const api = {
     if (!res.ok) throw new Error('Failed to load audit log')
     return res.json()
   },
+  ingest: async (limit = 20) => {
+    const res = await fetch(`${BASE}/ingest?limit=${limit}`)
+    if (!res.ok) throw new Error('Failed to load ingestion ledger')
+    return res.json()
+  },
   applySuggestion: (ngram, intent, weight) =>
     post('/feedback/suggestions/apply', { ngram, intent, weight }),
   rejectSuggestion: (ngram, intent) =>

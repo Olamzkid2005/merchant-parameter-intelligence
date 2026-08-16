@@ -376,6 +376,7 @@ python tests/test_enrichment.py       # Tier-1 WordNet enrichment pipeline (herm
 python tests/test_shadow_review.py    # Tier-2 §7 spot-check tooling + Phase-3 fit_tier2 gates + shadow_health (hermetic: temp shadow + review files; 47 checks)
 python tests/test_audit.py            # append-only audit trail (roadmap #1 slice; hermetic: temp MERCHANT_AUDIT_DB; 18 checks)
 python tests/test_auth.py             # opt-in authN/Z + RBAC + field masking (roadmap #1 slice; hermetic: temp config + sessions; 27 checks)
+python tests/test_ingest_ledger.py    # ingestion-run ledger + freshness signal (roadmap #2 slice; hermetic: temp INGEST_LEDGER_FILE + temp source folder; 25 checks)
 python tests/test_app_start.py        # launcher pre-flight
 python tests/test_watch_mode.py       # --watch rebuild flag
 python tests/test_foreground_mode.py  # --log-follow mode

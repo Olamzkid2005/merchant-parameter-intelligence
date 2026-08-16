@@ -104,6 +104,16 @@ denormalized `merchants` table, `sheet_name` doubles as source attribution, and
 there are no migrations or versioned schema. Data freshness = "somebody
 remembered to rebuild."
 
+> **Status (first slice shipped):** the ingestion ledger + freshness signal
+> (`merchant_intelligence/ingest_ledger.py`, append-only `data/ingest_ledger.db`
+> surviving merchant-DB rebuilds; every `app.start rebuild` and
+> `build_intelligence_db.py` run is recorded with its per-source snapshot and
+> row count; `GET /api/ingest` exposes runs/stats/freshness; Data freshness &
+> ingestion ledger card on the Audit Trail page). "Somebody remembered to
+> rebuild" is now visible: the card flags every workbook that is NEW or
+> CHANGED since the last good build. Remaining roadmap: incremental
+> ingestion/watch mode, schema versioning + migrations, source lineage.
+
 **Why it matters:** The Excel → rebuild flow is the operational bottleneck and
 the source of every data-quality bug (the README itself warns "check the
 workbook first, then the build script, then the DB"). It's also single-writer:
