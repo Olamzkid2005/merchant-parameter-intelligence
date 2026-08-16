@@ -377,7 +377,7 @@ python tests/test_shadow_review.py    # Tier-2 §7 spot-check tooling + Phase-3 
 python tests/test_audit.py            # append-only audit trail (roadmap #1 slice; hermetic: temp MERCHANT_AUDIT_DB; 18 checks)
 python tests/test_auth.py             # opt-in authN/Z + RBAC + field masking (roadmap #1 slice; hermetic: temp config + sessions; 27 checks)
 python tests/test_ingest_ledger.py    # ingestion-run ledger + freshness signal (roadmap #2 slice; hermetic: temp INGEST_LEDGER_FILE + temp source folder; 25 checks)
-python tests/test_api_split.py        # api.py router-split parity (roadmap #3 slice; hermetic: 55-path OpenAPI set vs git HEAD + legacy re-exports; 16 checks)
+python tests/test_api_split.py        # api.py router-split parity + /api/v1 mirror (roadmap #3 slices; hermetic: 55-path sets on both mounts vs git HEAD~1 + legacy re-exports; 19 checks)
 python tests/test_app_start.py        # launcher pre-flight
 python tests/test_watch_mode.py       # --watch rebuild flag
 python tests/test_foreground_mode.py  # --log-follow mode
@@ -462,15 +462,19 @@ column check) — a rebuild that regresses any of these fails loudly.
 
 ## 12. OUTSTANDING WORK (candidates, not committed plans)
 
-- **`api.py` router split is DONE** (roadmap #3 slice) — handlers now live in
+- **`api.py` router split is DONE** (roadmap #3 slices 1–2) — handlers live in
   `api_routes/` (`auth_routes`, `profile_routes`, `search_routes`,
   `tasks_routes`, `admin_routes`) over `api_shared.py` (helpers, models,
   singletons, workbook styling); `api.py` is a slim bootstrap that mounts the
   routers and re-exports every handler/model so `import api; api.search(...)`
-  keeps working. Path set verified byte-identical (55 unique; 61 handlers);
-  `tests/test_api_split.py` locks parity. Next from the roadmap: `/api/v1`
-  versioned contract, JSON-first response envelope (Excel as explicit export
-  transform), OpenTelemetry tracing/metrics, Docker packaging.
+  keeps working. The routers are mounted TWICE over the same handlers:
+  `/api` (legacy, byte-identical) and `/api/v1` (the stable versioned
+  contract — 55 paths mirrored 1:1). Note: FastAPI 0.141 does no slash
+  normalization, so router paths MUST be absolute (`/search`, not `search`).
+  Path sets verified byte-identical on both mounts; `tests/test_api_split.py`
+  locks parity. Next from the roadmap: OpenAPI-as-contract + JSON-first
+  response envelope (Excel as explicit export transform), OpenTelemetry
+  tracing/metrics, Docker packaging.
 - **Frontend polish candidates** — search-results cards don't show the new
   fields (Bank/State/MCC); Linked records table could gain Terminal Owners /
   Acquirer columns.

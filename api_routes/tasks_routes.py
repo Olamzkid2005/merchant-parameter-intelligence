@@ -70,7 +70,7 @@ class SettingsUpdateRequest(BaseModel):
     semantic_tier_mode: Optional[str] = None
 
 
-@router.post("/api/task")
+@router.post("/task")
 def task(req: TaskRequest):
     """Natural-language task interpreter (feature: paste a request).
 
@@ -218,7 +218,7 @@ def task(req: TaskRequest):
     return result
 
 
-@router.get("/api/feedback/suggestions")
+@router.get("/feedback/suggestions")
 def feedback_suggestions():
     """Self-improvement loop status: mined pattern suggestions + outcome stats.
 
@@ -233,7 +233,7 @@ def feedback_suggestions():
     return feedback.report()
 
 
-@router.post("/api/feedback/suggestions/apply")
+@router.post("/feedback/suggestions/apply")
 def suggestion_apply(req: SuggestionAction):
     """Accept a mined suggestion: write it to intents.json + hot-reload."""
     from merchant_intelligence import feedback
@@ -248,7 +248,7 @@ def suggestion_apply(req: SuggestionAction):
             "spec": spec}
 
 
-@router.post("/api/feedback/suggestions/reject")
+@router.post("/feedback/suggestions/reject")
 def suggestion_reject(req: SuggestionAction):
     """Reject a mined suggestion so it never resurfaces."""
     from merchant_intelligence import feedback
@@ -256,7 +256,7 @@ def suggestion_reject(req: SuggestionAction):
     return {"ok": True}
 
 
-@router.get("/api/synonyms")
+@router.get("/synonyms")
 def get_synonym_candidates():
     """Tier-1 WordNet proposals (design doc §4): pending/approved/rejected
     candidate phrases grouped for curation on the Rule Engine page."""
@@ -264,7 +264,7 @@ def get_synonym_candidates():
     return enrichment.candidates()
 
 
-@router.post("/api/synonyms/propose")
+@router.post("/synonyms/propose")
 def propose_synonyms():
     """Re-run the WordNet proposal stage (idempotent — statuses preserved).
     400 with an install hint when nltk/wordnet is unavailable."""
@@ -279,7 +279,7 @@ def propose_synonyms():
     return r
 
 
-@router.post("/api/synonyms/status")
+@router.post("/synonyms/status")
 def synonym_status(req: SynonymStatusRequest):
     """The curation gate: mark candidate ids approved or rejected."""
     from merchant_intelligence.tasks import enrichment
@@ -290,7 +290,7 @@ def synonym_status(req: SynonymStatusRequest):
     return r
 
 
-@router.post("/api/synonyms/apply")
+@router.post("/synonyms/apply")
 def apply_synonyms(req: SynonymApplyRequest):
     """Merge approved candidates into intents.json (weight-2 patterns),
     regenerating vocab.py's defaults in lockstep, appending the phrases to
@@ -299,14 +299,14 @@ def apply_synonyms(req: SynonymApplyRequest):
     return enrichment.apply_approved(req.ids)
 
 
-@router.get("/api/synonyms/manifest")
+@router.get("/synonyms/manifest")
 def synonym_manifest():
     """Provenance of every applied auto-pattern (data/auto_pattern_manifest.json)."""
     from merchant_intelligence.tasks import enrichment
     return enrichment.manifest()
 
 
-@router.get("/api/shadow/review")
+@router.get("/shadow/review")
 def shadow_review(band: str = "all", limit: int = 100):
     """Phase-1 spot-check tool (design doc §7): shadow decisions joined with
     review labels, band-filtered, plus per-intent precision on the
@@ -327,7 +327,7 @@ def shadow_review(band: str = "all", limit: int = 100):
     return out
 
 
-@router.post("/api/shadow/review")
+@router.post("/shadow/review")
 def shadow_review_label(req: ShadowReviewLabelRequest):
     """Record a reviewer's verdict on one shadow entry (latest wins)."""
     from merchant_intelligence.tasks import semantic
@@ -342,7 +342,7 @@ def shadow_review_label(req: ShadowReviewLabelRequest):
                                 intent=req.intent)
 
 
-@router.get("/api/audit")
+@router.get("/audit")
 def audit_endpoint(limit: int = 200, action: str = "", actor: str = ""):
     """Immutable audit trail (docs/technical-review-2026-08-original.md #1).
 
@@ -360,7 +360,7 @@ def audit_endpoint(limit: int = 200, action: str = "", actor: str = ""):
     }
 
 
-@router.get("/api/ingest")
+@router.get("/ingest")
 def ingest_endpoint(limit: int = 20):
     """Ingestion-run ledger + data-freshness signal (governed data platform
     slice, docs/technical-review-2026-08-original.md #2).
@@ -379,7 +379,7 @@ def ingest_endpoint(limit: int = 20):
     }
 
 
-@router.post("/api/task/analyze")
+@router.post("/task/analyze")
 def task_analyze(req: TaskRequest):
     """Intent-parser debug endpoint (v2): explain WHY a request was routed
     the way it was.
@@ -401,7 +401,7 @@ def task_analyze(req: TaskRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.get("/api/calibration")
+@router.get("/calibration")
 def get_calibration():
     """Confidence calibration status (feature: fit ask thresholds from usage).
 
@@ -421,7 +421,7 @@ def get_calibration():
     }
 
 
-@router.post("/api/calibration/reset")
+@router.post("/calibration/reset")
 def reset_calibration():
     """Wipe the decision log ("start learning fresh")."""
     from merchant_intelligence import calibration
@@ -430,7 +430,7 @@ def reset_calibration():
             "stats": calibration.stats()}
 
 
-@router.get("/api/preferences")
+@router.get("/preferences")
 def get_preferences():
     """Saved clarification choices (phrase -> intent) for the Rule Engine UI.
 
@@ -451,7 +451,7 @@ def get_preferences():
     }
 
 
-@router.post("/api/preferences/forget")
+@router.post("/preferences/forget")
 def forget_preference(req: PreferenceForgetRequest):
     """Forget one saved interpretation (the Rule Engine delete button)."""
     from merchant_intelligence import preferences
@@ -460,7 +460,7 @@ def forget_preference(req: PreferenceForgetRequest):
             "preferences": get_preferences()}
 
 
-@router.get("/api/intents")
+@router.get("/intents")
 def get_intents():
     """Intent config for the Rule Engine tuning UI (read-only).
 
@@ -482,7 +482,7 @@ def get_intents():
     }
 
 
-@router.put("/api/intents")
+@router.put("/intents")
 def update_intent(req: IntentUpdateRequest):
     """Update one intent's patterns/keywords, persist to intents.json, and
     hot-reload the engine so the change applies immediately (no restart)."""
@@ -518,7 +518,7 @@ def update_intent(req: IntentUpdateRequest):
     }
 
 
-@router.get("/api/settings")
+@router.get("/settings")
 def get_settings():
     """Runtime engine settings for the Rule Engine tuning UI (read-only).
 
@@ -534,7 +534,7 @@ def get_settings():
     }
 
 
-@router.put("/api/settings")
+@router.put("/settings")
 def update_settings(req: SettingsUpdateRequest):
     """Update runtime engine settings, persist to data/engine_settings.json
     and apply immediately (no restart).
@@ -562,7 +562,7 @@ def update_settings(req: SettingsUpdateRequest):
     }
 
 
-@router.delete("/api/settings")
+@router.delete("/settings")
 def reset_settings():
     """Delete data/engine_settings.json so every knob falls back to its
     built-in default (the 'Reset to defaults' button on the Rule Engine)."""

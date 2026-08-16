@@ -138,7 +138,7 @@ def _run_batch(merchants: list[str]) -> list[dict]:
     return rows
 
 
-@router.post("/api/report")
+@router.post("/report")
 def report(req: BatchRequest):
     """Phase 9 Merchant Intelligence Report — full multi-sheet preview."""
     from report import build_report
@@ -164,7 +164,7 @@ def report(req: BatchRequest):
     }
 
 
-@router.post("/api/report/export")
+@router.post("/report/export")
 def report_export(req: BatchRequest):
     """Build the Phase 9 report and download it as a multi-sheet workbook."""
     from report import build_report, SHEET_ORDER, SHEET_NAMES
@@ -190,7 +190,7 @@ def report_export(req: BatchRequest):
     )
 
 
-@router.post("/api/learn")
+@router.post("/learn")
 def learn(req: LearnRequest):
     """Teach the alias engine a new query -> merchant mapping (Phase 10)."""
     query = req.query.strip()
@@ -218,7 +218,7 @@ def learn(req: LearnRequest):
     return {"learned": learned, "query": query, "merchant_name": merchant}
 
 
-@router.post("/api/quickmatch")
+@router.post("/quickmatch")
 def quickmatch(req: QuickMatchRequest):
     """Resolve a batch of identifiers (phones, MX codes, TIDs, emails, account
     numbers) against the registry. Unlike /api/batch (name fuzzy matching),
@@ -244,7 +244,7 @@ def quickmatch(req: QuickMatchRequest):
     }
 
 
-@router.post("/api/quickmatch/export")
+@router.post("/quickmatch/export")
 def quickmatch_export(req: QuickMatchRequest):
     """Resolve identifiers and export the results as an Excel workbook."""
     identifiers = [i.strip() for i in req.identifiers if i.strip()][:2000]
@@ -265,7 +265,7 @@ def quickmatch_export(req: QuickMatchRequest):
     )
 
 
-@router.post("/api/task/export")
+@router.post("/task/export")
 def task_export(req: TaskRequest):
     """Interpret a pasted request, execute it, and export the result table as
     an Excel workbook (used by the Export button on task results)."""
@@ -300,7 +300,7 @@ def task_export(req: TaskRequest):
     )
 
 
-@router.post("/api/batch")
+@router.post("/batch")
 def batch(req: BatchRequest):
     merchants = [m.strip() for m in req.merchants if m.strip()][:1000]
     if not merchants:
@@ -323,7 +323,7 @@ def batch(req: BatchRequest):
     }
 
 
-@router.post("/api/batch/export")
+@router.post("/batch/export")
 def batch_export(req: BatchRequest):
     merchants = [m.strip() for m in req.merchants if m.strip()][:1000]
     rows = _run_batch(merchants)
@@ -340,7 +340,7 @@ def batch_export(req: BatchRequest):
     )
 
 
-@router.get("/api/quality")
+@router.get("/quality")
 def quality():
     """Data quality scan of the registry (reuses data_quality.run_quality)."""
     from data_quality import run_quality
@@ -357,7 +357,7 @@ def quality():
     }
 
 
-@router.post("/api/quality/export")
+@router.post("/quality/export")
 def quality_export():
     """Export the data quality report as an Excel workbook."""
     from data_quality import run_quality
@@ -384,7 +384,7 @@ def quality_export():
     )
 
 
-@router.post("/api/reconcile")
+@router.post("/reconcile")
 def reconcile_endpoint(req: BatchRequest):
     """Reconcile a merchant list into verified matches + recovered assets."""
     from reconcile import reconcile as run_reconcile
@@ -421,7 +421,7 @@ def reconcile_endpoint(req: BatchRequest):
     }
 
 
-@router.post("/api/brief")
+@router.post("/brief")
 def brief(req: ProfileRequest):
     """LLM investigation brief for a merchant fragment (feature #6).
 
@@ -443,7 +443,7 @@ def brief(req: ProfileRequest):
     return out
 
 
-@router.get("/api/selfimprove")
+@router.get("/selfimprove")
 def selfimprove_status():
     """Last alias-free harness run + current baseline (feature #10).
 
@@ -463,7 +463,7 @@ def selfimprove_status():
     return out
 
 
-@router.post("/api/reconcile/export")
+@router.post("/reconcile/export")
 def reconcile_export(req: BatchRequest):
     """Run reconciliation and export the full report as Excel."""
     from reconcile import reconcile as run_reconcile

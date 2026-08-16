@@ -33,7 +33,7 @@ class AuthPasswordRequest(BaseModel):
     password: str = ""
 
 
-@router.post("/api/auth/login")
+@router.post("/auth/login")
 def auth_login(req: LoginRequest):
     """Username + password -> expiring session cookie (mi_session)."""
     from merchant_intelligence import auth
@@ -57,7 +57,7 @@ def auth_login(req: LoginRequest):
     return resp
 
 
-@router.post("/api/auth/logout")
+@router.post("/auth/logout")
 def auth_logout(request: Request):
     """Destroy the current session and clear the cookie."""
     from merchant_intelligence import auth
@@ -69,7 +69,7 @@ def auth_logout(request: Request):
     return resp
 
 
-@router.get("/api/auth/me")
+@router.get("/auth/me")
 def auth_me(request: Request):
     """Auth status for the UI: enabled + who am I (if logged in)."""
     from merchant_intelligence import auth
@@ -84,7 +84,7 @@ def auth_me(request: Request):
             "user": session["username"], "role": session["role"]}
 
 
-@router.get("/api/auth/config")
+@router.get("/auth/config")
 def auth_config():
     """Security config for the Rule Engine card (users shown without
     hashes). Write endpoints are admin-gated once access control is on."""
@@ -96,7 +96,7 @@ def auth_config():
                       for u in cfg["users"]]}
 
 
-@router.post("/api/auth/config")
+@router.post("/auth/config")
 def auth_save_config(req: AuthConfigRequest):
     """Toggle access control and/or the session TTL. Enabling with zero
     users would lock everyone out, so that is refused."""
@@ -116,7 +116,7 @@ def auth_save_config(req: AuthConfigRequest):
             "session_ttl_hours": cfg["session_ttl_hours"]}
 
 
-@router.post("/api/auth/users")
+@router.post("/auth/users")
 def auth_add_user(req: AuthUserRequest):
     """Create a user (bootstrap path works while access control is off)."""
     from merchant_intelligence import auth
@@ -144,7 +144,7 @@ def auth_add_user(req: AuthUserRequest):
                       for u in cfg["users"]]}
 
 
-@router.delete("/api/auth/users")
+@router.delete("/auth/users")
 def auth_remove_user(req: AuthUserRequest):
     """Remove a user; disabling access control when the last user goes."""
     from merchant_intelligence import auth
@@ -163,7 +163,7 @@ def auth_remove_user(req: AuthUserRequest):
                       for u in cfg["users"]]}
 
 
-@router.put("/api/auth/password")
+@router.put("/auth/password")
 def auth_reset_password(req: AuthPasswordRequest):
     """Reset a user's password (admin-gated when access control is on)."""
     from merchant_intelligence import auth

@@ -136,14 +136,21 @@ async def security_middleware(request: Request, call_next):
     return resp
 
 
-# Mount the domain routers — registration order matches the original api.py
-# route order (health/auth first, then profile/search/tasks/admin) so the
-# OpenAPI schema and route-matching behaviour are unchanged.
-app.include_router(auth_router)
-app.include_router(profile_router)
-app.include_router(search_router)
-app.include_router(tasks_router)
-app.include_router(admin_router)
+# Mount the domain routers TWICE over the same handlers (roadmap #3 slice):
+#   /api      — the legacy surface, byte-identical paths as before the split
+#   /api/v1   — the versioned contract, same handlers, stable for consumers
+# Registration order matches the original api.py route order (health/auth
+# first, then profile/search/tasks/admin) so route matching is unchanged.
+app.include_router(auth_router, prefix="/api")
+app.include_router(profile_router, prefix="/api")
+app.include_router(search_router, prefix="/api")
+app.include_router(tasks_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(profile_router, prefix="/api/v1")
+app.include_router(search_router, prefix="/api/v1")
+app.include_router(tasks_router, prefix="/api/v1")
+app.include_router(admin_router, prefix="/api/v1")
 
 
 # ── backwards-compatible re-exports ──────────────────────────────────────

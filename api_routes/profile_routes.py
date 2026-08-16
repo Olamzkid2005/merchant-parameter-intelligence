@@ -25,12 +25,12 @@ class TimelineRequest(BaseModel):
     query: str
 
 
-@router.get("/api/health")
+@router.get("/health")
 def health():
     return {"status": "ok"}
 
 
-@router.post("/api/profile")
+@router.post("/profile")
 def profile(req: ProfileRequest):
     """Merchant 360° profile — everything the registry knows about a fragment.
 
@@ -46,7 +46,7 @@ def profile(req: ProfileRequest):
     return get_profiler().build(query, max_members=req.max_members)
 
 
-@router.post("/api/timeline")
+@router.post("/timeline")
 def timeline(req: TimelineRequest):
     """Per-terminal timeline for a merchant fragment (build-time events).
 
@@ -82,7 +82,7 @@ def timeline(req: TimelineRequest):
         conn.close()
 
 
-@router.post("/api/compare")
+@router.post("/compare")
 def compare(req: CompareRequest):
     """Compare two merchants' 360° profiles side by side.
 
@@ -97,7 +97,7 @@ def compare(req: CompareRequest):
     return get_profiler().compare(query_a, query_b, max_members=req.max_members)
 
 
-@router.get("/api/stats")
+@router.get("/stats")
 def stats():
     try:
         conn = sqlite3.connect(str(config.active_db()))

@@ -37,7 +37,7 @@ class AliasAction(BaseModel):
     canonical: str
 
 
-@router.post("/api/search")
+@router.post("/search")
 def search(req: SearchRequest):
     query = req.query.strip()
     if not query:
@@ -87,7 +87,7 @@ def search(req: SearchRequest):
     }
 
 
-@router.post("/api/entity")
+@router.post("/entity")
 def entity(req: EntityRequest):
     """Entity graph: merchant family + BFS relationship graph.
 
@@ -123,7 +123,7 @@ def entity(req: EntityRequest):
     }
 
 
-@router.post("/api/search/export")
+@router.post("/search/export")
 def search_export(req: SearchRequest):
     """Export the current search view as an Excel workbook."""
     query = req.query.strip()
@@ -165,7 +165,7 @@ def search_export(req: SearchRequest):
     )
 
 
-@router.get("/api/idclass/debug")
+@router.get("/idclass/debug")
 def idclass_debug(values: str = "", text: str = "", limit: int = 50):
     """Debug the DB-rooted identifier classifier (idclass.py).
 
@@ -252,7 +252,7 @@ def _fuzzy_prefix_suggestions(prefix: str, keys, limit: int) -> list:
     return [k for _s, k in scored[:limit]]
 
 
-@router.get("/api/autocomplete")
+@router.get("/autocomplete")
 def autocomplete(prefix: str = "", limit: int = 8):
     """Live typeahead suggestions from the normalized name_buckets table.
 
@@ -306,7 +306,7 @@ def autocomplete(prefix: str = "", limit: int = 8):
     return {"prefix": prefix, "suggestions": suggestions}
 
 
-@router.post("/api/suggest")
+@router.post("/suggest")
 def suggest(req: SearchRequest):
     """Did-you-mean suggestions when a query yields no confident hits.
 
@@ -358,7 +358,7 @@ def suggest(req: SearchRequest):
     return {"query": query, "suggestions": suggestions[:6]}
 
 
-@router.post("/api/similar")
+@router.post("/similar")
 def similar(req: SearchRequest):
     """Similar merchants: records linked to the query by shared identifiers
     (entity family) — different names that resolve to the same merchant."""
@@ -391,7 +391,7 @@ def similar(req: SearchRequest):
     return {"query": query, "count": len(out), "similar": out[:req.limit]}
 
 
-@router.get("/api/duplicates")
+@router.get("/duplicates")
 def duplicates(limit: int = 100):
     """Duplicate merchant clusters: the same merchant name appearing on
     multiple DB rows (across sheets/files), grouped with locations."""
@@ -425,7 +425,7 @@ def duplicates(limit: int = 100):
     return {"count": len(clusters), "clusters": clusters}
 
 
-@router.get("/api/aliases")
+@router.get("/aliases")
 def aliases():
     """Alias review queue: manual + learned aliases with approval status."""
     engine = get_searcher().matcher.alias_engine
@@ -443,14 +443,14 @@ def aliases():
     }
 
 
-@router.post("/api/aliases/approve")
+@router.post("/aliases/approve")
 def alias_approve(req: AliasAction):
     """Approve a learned alias in the review queue."""
     engine = get_searcher().matcher.alias_engine
     return {"ok": engine.approve(req.alias, req.canonical)}
 
 
-@router.post("/api/aliases/reject")
+@router.post("/aliases/reject")
 def alias_reject(req: AliasAction):
     """Reject (forget) a learned alias in the review queue."""
     engine = get_searcher().matcher.alias_engine
