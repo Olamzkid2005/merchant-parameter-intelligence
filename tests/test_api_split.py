@@ -68,24 +68,38 @@ check(f"all {len(legacy)} legacy names resolve", not missing,
       f"missing: {missing}")
 
 print("[2] legacy /api surface matches the pre-split route set (55 unique)")
-# Baseline = the pre-split monolith (HEAD~1) — HEAD's api.py is the slim
-# bootstrap with no @app decorators, so it cannot be the comparison source.
-old_src = subprocess.run(["git", "show", "HEAD~1:api.py"],
+# Baseline = the pre-split monolith — the most recent commit whose api.py
+# still carried @app decorators (HEAD~1 is only valid right after the split;
+# as commits move on the baseline must be walked back to the last monolith).
+last = subprocess.run(["git", "log", "--format=%H", "-n", "50"],
+                      capture_output=True, text=True).stdout.split()
+old_src = ""
+for commit in last:
+    src = subprocess.run(["git", "show", f"{commit}:api.py"],
                          capture_output=True, text=True).stdout
+    if re.search(r'@app\.(?:get|post|put|delete|patch)\("', src):
+        old_src = src
+        break
 old_paths = set(re.findall(r'@app\.(?:get|post|put|delete|patch)\("([^"]+)"',
                            old_src))
 check("pre-split unique paths == 55", len(old_paths) == 55, repr(len(old_paths)))
+# Deliberate additions after the split (new features, not regressions): each
+# one bumps the 55-path baseline below and is excluded from the added-check.
+DELIBERATE_ADDITIONS = {"/api/copilot"}
 all_paths = set(api.app.openapi()["paths"].keys())
 legacy = {p for p in all_paths if p.startswith("/api/") and not p.startswith("/api/v1/")}
-check("legacy surface unchanged (55 paths)", len(legacy) == 55, repr(len(legacy)))
+expected = 55 + len(DELIBERATE_ADDITIONS)
+check(f"legacy surface unchanged ({expected} paths)", len(legacy) == expected,
+      repr(len(legacy)))
 check("no legacy paths dropped", not (old_paths - legacy),
       f"dropped: {sorted(old_paths - legacy)}")
-check("no legacy paths added", not (legacy - old_paths),
-      f"added: {sorted(legacy - old_paths)}")
+undocumented = (legacy - old_paths) - DELIBERATE_ADDITIONS
+check("no undocumented legacy paths added", not undocumented,
+      f"added: {sorted(undocumented)}")
 
 print("[2b] /api/v1 mirror exists for every legacy path (roadmap #3 slice 2)")
 v1 = {p for p in all_paths if p.startswith("/api/v1/")}
-check("v1 has 55 paths", len(v1) == 55, repr(len(v1)))
+check(f"v1 has {expected} paths", len(v1) == expected, repr(len(v1)))
 legacy_tails = {p[len("/api"):] for p in legacy}
 v1_tails = {p[len("/api/v1"):] for p in v1}
 check("v1 mirrors legacy exactly", not (legacy_tails - v1_tails) and not (v1_tails - legacy_tails),

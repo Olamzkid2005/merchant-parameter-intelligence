@@ -207,6 +207,21 @@ compounding design.
 
 ## 4. Agentic "Merchant Copilot" (LLM + RAG) — New Strategic Direction
 
+> **Status (first slice shipped):** the compound-request copilot
+> (`merchant_intelligence/copilot.py`, `POST /api/copilot`, dedicated Copilot
+> page in the UI). Hybrid NLU per the phased plan: when `LLM_API_KEY` is set
+> the model proposes the step decomposition; otherwise (or on failure) the
+> rule engine decomposes (whole-task → clause split). Every step is executed
+> by the DETERMINISTIC engine (`detect_task`/`execute_task`/search) — the LLM
+> can never inject identifiers or bypass a pipeline, and a chain like "find
+> MEDPLUS then the static account for those" resolves "those/the above"
+> against the previous step's output (`remember_entities` + `inherit_reference`
+> + pronoun normalization). The response is the recorded, replayable trace:
+> ordered plan + per-step results + provenance (mode/model/elapsed), audit-
+> logged. Remaining slices: RAG grounding over the #2 data platform, LLM
+> tool-use over the full #3 API (compare/reconcile/brief), and the
+> trace→dataset feed into #5.
+
 **Current limitation:** The intent parser is an impressive
 regex/fuzzy/weighted-pattern engine (`intents.json` + `parser.py` +
 `pipelines.py`), but it is fundamentally closed-world: it can only execute the

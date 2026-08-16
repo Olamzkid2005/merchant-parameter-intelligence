@@ -271,6 +271,7 @@ triggers the clarification popup even when address text scores other intents.
 | Search | `SearchPage.jsx` | main search bar + fuzzy autocomplete, results with source chips + key-merchant badge + export |
 | Batch Search | `BatchPage.jsx` | paste a list of names → one table |
 | Quick Match | `QuickMatchPage.jsx` | precision-first identifier resolution (shows matched field) |
+| Copilot | `CopilotPage.jsx` | compound-request planner (roadmap #4): paste a multi-step investigation, see the decomposed plan + per-step results; LLM proposes the plan when a key is set, rule engine always executes/validates |
 | Entity Graph | `EntityGraphPage.jsx` | visual graph of records linked by shared identifiers; node search + depth control + severity coloring |
 | Merchant Profile | `ProfilePage.jsx` | 360° profile, Linked records table (with Bank/State/MCC/Settlement/LGA columns), relationship network, timeline, compare mode |
 | Reconcile | `ReconcilePage.jsx` | merchant list vs registry reconciliation |
@@ -299,7 +300,9 @@ during `app.start` preflight).
 `GET /api/intents` (+ `PUT` to save edited patterns), `GET /api/settings`,
 `/api/calibration` + reset, `/api/preferences` + forget,
 `/api/feedback/suggestions` + apply/reject, `GET /api/idclass/debug`,
-`/api/selfimprove`, `POST /api/brief`.
+`/api/selfimprove`, `POST /api/brief`, `POST /api/copilot` (roadmap #4:
+compound-request decompose + execute, `{text, use_llm}` → plan + steps +
+provenance; served on both `/api` and `/api/v1`).
 
 ---
 
@@ -377,7 +380,8 @@ python tests/test_shadow_review.py    # Tier-2 §7 spot-check tooling + Phase-3 
 python tests/test_audit.py            # append-only audit trail (roadmap #1 slice; hermetic: temp MERCHANT_AUDIT_DB; 18 checks)
 python tests/test_auth.py             # opt-in authN/Z + RBAC + field masking (roadmap #1 slice; hermetic: temp config + sessions; 27 checks)
 python tests/test_ingest_ledger.py    # ingestion-run ledger + freshness signal (roadmap #2 slice; hermetic: temp INGEST_LEDGER_FILE + temp source folder; 25 checks)
-python tests/test_api_split.py        # api.py router-split parity + /api/v1 mirror (roadmap #3 slices; hermetic: 55-path sets on both mounts vs git HEAD~1 + legacy re-exports; 19 checks)
+python tests/test_api_split.py        # api.py router-split parity + /api/v1 mirror (roadmap #3 slices; hermetic: 55-path baseline vs the last pre-split commit + deliberate-additions allowlist + legacy re-exports; 19 checks)
+python tests/test_copilot.py          # Merchant Copilot (roadmap #4 slice; hermetic decompose + LIVE /api/copilot execution incl. the chained "find MEDPLUS then the static account for those" case; 38 checks)
 python tests/test_app_start.py        # launcher pre-flight
 python tests/test_watch_mode.py       # --watch rebuild flag
 python tests/test_foreground_mode.py  # --log-follow mode
@@ -387,9 +391,9 @@ python tests/test_open_flag.py        # --open browser flag
 `tests/test_tasks.py` hits the **live API** for its `[5*]` sections — the app
 must be running (`python app.start app`) or those sections fail with
 connection-refused (not a regression). Last full run: **all suites green**
-(602 task checks incl. live API, 38 enrichment, 22 semantic shadow, 9 golden,
-28 shadow review, 35 engine upgrades, 28 engine v2, 69 next-level) with the
-app up.
+(602 task checks incl. live API, 38 enrichment, 28 semantic shadow, 9 golden,
+28 shadow review, 18 audit, 27 auth, 25 ingest ledger, 17 autocomplete,
+19 api split, 38 copilot, 69 next-level) with the app up.
 
 Also: `scripts/build_intelligence_db.py` ends with `verify_search()` proofs
 (MRSP rows loaded, Change sheet rows loaded, ELEYELE SS resolves, MAX-INFO
@@ -475,6 +479,19 @@ column check) — a rebuild that regresses any of these fails loudly.
   locks parity. Next from the roadmap: OpenAPI-as-contract + JSON-first
   response envelope (Excel as explicit export transform), OpenTelemetry
   tracing/metrics, Docker packaging.
+- **Copilot is DONE (first slice)** (roadmap #4) — `merchant_intelligence/
+  copilot.py` + `POST /api/copilot` + Copilot page. Hybrid NLU: LLM proposes
+  the step decomposition when `LLM_API_KEY` is set; otherwise the rule engine
+  decomposes (whole-task → clause split). Every step executes through the
+  deterministic engine (`detect_task`/`execute_task`/search) — the LLM can
+  never inject identifiers or bypass a pipeline. Chaining: "find MEDPLUS then
+  the static account for those" resolves "those/the above" against the
+  previous step via `remember_entities` + `inherit_reference` + pronoun
+  normalization (`_normalize_reference` maps those/them/these → "the above
+  merchant" when the step has no entity of its own). Response is the
+  replayable trace (plan + per-step results + mode/model/elapsed), audit-
+  logged, on `/api` and `/api/v1`. Remaining copilot slices: RAG grounding,
+  LLM tool-use over compare/reconcile/brief, trace→dataset feed into #5.
 - **Frontend polish candidates** — search-results cards don't show the new
   fields (Bank/State/MCC); Linked records table could gain Terminal Owners /
   Acquirer columns.

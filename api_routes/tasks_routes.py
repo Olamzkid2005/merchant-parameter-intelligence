@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from api_shared import (
     _audit,
     _log_task_request,
+    CopilotRequest,
     TaskRequest,
 )
 
@@ -377,6 +378,35 @@ def ingest_endpoint(limit: int = 20):
         "freshness": ingest_ledger.freshness(),
         "file": str(ingest_ledger._db_path()),
     }
+
+
+@router.post("/copilot")
+def copilot(req: CopilotRequest):
+    """Agentic Merchant Copilot (roadmap #4, first slice).
+
+    Decomposes a COMPOUND investigation request ("find MEDPLUS, then get
+    the tids for the above merchant, then the static account and
+    beneficiary") into an ordered, inspectable, re-runnable plan of steps
+    and executes each step through the deterministic engine. Hybrid NLU:
+    when an LLM is configured it proposes the decomposition, but every
+    step is validated and executed by detect_task/execute_task — the LLM
+    can never inject identifiers or bypass a pipeline. Without a key the
+    rule engine decomposes (whole-task -> clause split -> chained steps).
+
+    Response: {ok, text, mode (llm|deterministic), model, llm_error,
+    plan: [{index, text, source}], steps: [{index, kind, intent, rows,
+    result, ...}], summary, elapsed_ms}.
+    """
+    from merchant_intelligence import copilot
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    _audit("copilot", json.dumps({"text": text[:300],
+                                  "use_llm": req.use_llm}))
+    try:
+        return copilot.run_copilot(text, use_llm=req.use_llm)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/task/analyze")

@@ -303,3 +303,12 @@ class TaskRequest(BaseModel):
     text: str = ""
     intent: str = ""  # clarification choice: force this intent for the run
     remember: bool = False  # save this phrase -> intent for next time
+
+
+class CopilotRequest(BaseModel):
+    """Merchant Copilot (roadmap #4): a compound investigation request that
+    gets decomposed into an ordered, re-runnable plan of deterministic
+    steps. use_llm lets the caller force the rule-engine decomposition
+    (deterministic) or allow the LLM to propose the plan when configured."""
+    text: str = ""
+    use_llm: bool = True

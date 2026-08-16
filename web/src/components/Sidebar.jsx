@@ -2,6 +2,7 @@ const NAV = [
   { key: 'search', label: 'Search', icon: 'manage_search' },
   { key: 'batch', label: 'Batch Search', icon: 'playlist_add_check' },
   { key: 'quickmatch', label: 'Quick Match', icon: 'bolt' },
+  { key: 'copilot', label: 'Copilot', icon: 'auto_awesome' },
   { key: 'entity', label: 'Entity Graph', icon: 'hub' },
   { key: 'profile', label: 'Merchant Profile', icon: 'person_search' },
   { key: 'reconcile', label: 'Reconcile', icon: 'rule' },

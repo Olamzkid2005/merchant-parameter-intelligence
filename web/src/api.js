@@ -144,6 +144,7 @@ export const api = {
     return res.json()
   },
   taskAnalyze: (text) => post('/task/analyze', { text }),
+  copilot: (text, use_llm = true) => post('/copilot', { text, use_llm }),
   calibration: async () => {
     const res = await fetch(`${BASE}/calibration`)
     if (!res.ok) throw new Error('Failed to load calibration')

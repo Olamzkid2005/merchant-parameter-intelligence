@@ -6,6 +6,7 @@ import BatchPage from './pages/BatchPage'
 import EntityGraphPage from './pages/EntityGraphPage'
 import ProfilePage from './pages/ProfilePage'
 import QuickMatchPage from './pages/QuickMatchPage'
+import CopilotPage from './pages/CopilotPage'
 import ReconcilePage from './pages/ReconcilePage'
 import RuleEnginePage from './pages/RuleEnginePage'
 import QualityPage from './pages/QualityPage'
@@ -19,6 +20,7 @@ const PAGES = [
   { key: 'search', label: 'Search' },
   { key: 'batch', label: 'Batch Search' },
   { key: 'quickmatch', label: 'Quick Match' },
+  { key: 'copilot', label: 'Copilot' },
   { key: 'entity', label: 'Entity Graph' },
   { key: 'profile', label: 'Merchant Profile' },
   { key: 'reconcile', label: 'Reconcile' },
@@ -89,6 +91,7 @@ export default function App() {
             {page === 'search' && <SearchPage onOpenProfile={(name) => navigate('profile', { q: name })} />}
             {page === 'batch' && <BatchPage onOpenProfile={(name) => navigate('profile', { q: name })} />}
             {page === 'quickmatch' && <QuickMatchPage onOpenProfile={(name) => navigate('profile', { q: name })} />}
+            {page === 'copilot' && <CopilotPage />}
             {page === 'entity' && <EntityGraphPage />}
             {page === 'profile' && (
               <ProfilePage onOpenGraph={(name) => navigate('entity', { q: name })} />

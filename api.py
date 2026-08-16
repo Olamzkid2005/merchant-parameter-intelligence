@@ -46,6 +46,7 @@ from api_shared import (  # noqa: E402
     get_searcher,
     BatchRequest,
     CompareRequest,
+    CopilotRequest,
     EntityRequest,
     LearnRequest,
     ProfileRequest,
@@ -167,9 +168,9 @@ from api_routes.search_routes import (  # noqa: E402,F401
     idclass_debug, search, search_export, similar, suggest,
 )
 from api_routes.tasks_routes import (  # noqa: E402,F401
-    apply_synonyms, audit_endpoint, feedback_suggestions, forget_preference,
-    get_calibration, get_intents, get_preferences, get_settings,
-    get_synonym_candidates, ingest_endpoint, propose_synonyms,
+    apply_synonyms, audit_endpoint, copilot, feedback_suggestions,
+    forget_preference, get_calibration, get_intents, get_preferences,
+    get_settings, get_synonym_candidates, ingest_endpoint, propose_synonyms,
     reset_calibration, reset_settings, shadow_review, shadow_review_label,
     suggestion_apply, suggestion_reject, synonym_manifest, synonym_status,
     task, task_analyze, update_intent, update_settings,
