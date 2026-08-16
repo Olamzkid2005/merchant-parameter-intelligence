@@ -12,6 +12,7 @@ POST /api/search          — {query, limit} → scored results
 POST /api/batch           — {merchants: [...]} → best-match rows
 POST /api/batch/export    — same as /api/batch but returns an .xlsx file
 """
+import json
 import logging
 import re
 import sys
@@ -21,6 +22,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _audit(action: str, scope: Optional[str] = None,
+           detail: Optional[str] = None) -> None:
+    """Best-effort audit-trail append (roadmap #1) — never breaks the
+    request; audit.record() already swallows its own failures."""
+    try:
+        from merchant_intelligence import audit
+        audit.record(action, scope=scope, detail=detail)
+    except Exception:  # noqa: BLE001
+        pass
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -184,6 +196,7 @@ def profile(req: ProfileRequest):
     query = req.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
+    _audit("profile", json.dumps({"query": query}))
     return get_profiler().build(query, max_members=req.max_members)
 
 
@@ -260,6 +273,8 @@ def search(req: SearchRequest):
     query = req.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
+    _audit("search", json.dumps({"query": query,
+                                 "offset": req.offset, "limit": req.limit}))
     t0 = time.perf_counter()
     fetch = min(req.offset + req.limit, 200)
     results = _search_with_multi(query, fetch, req.min_score)
@@ -370,6 +385,7 @@ def search_export(req: SearchRequest):
     query = req.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
+    _audit("export", json.dumps({"kind": "search", "query": query}))
     fetch = min(req.offset + req.limit, 200)
     results = _search_with_multi(query, fetch, req.min_score)
     page = results[req.offset:req.offset + req.limit]
@@ -736,6 +752,7 @@ def report_export(req: BatchRequest):
     merchants = [m.strip() for m in req.merchants if m.strip()][:1000]
     if not merchants:
         raise HTTPException(status_code=400, detail="merchants is empty")
+    _audit("export", json.dumps({"kind": "report", "count": len(merchants)}))
     rep = build_report(merchants, top_n=3)
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -847,6 +864,8 @@ def quickmatch_export(req: QuickMatchRequest):
     identifiers = [i.strip() for i in req.identifiers if i.strip()][:2000]
     if not identifiers:
         raise HTTPException(status_code=400, detail="identifiers is empty")
+    _audit("export", json.dumps({"kind": "quickmatch",
+                                 "count": len(identifiers)}))
     rows = _quick_match_rows(identifiers)
     df = pd.DataFrame(rows)
     buffer = BytesIO()
@@ -918,6 +937,8 @@ def task(req: TaskRequest):
         detected = tasks.detect_task(text, intent_override=override)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    _audit("task", json.dumps({"text": text[:300],
+                               "intent": (detected or {}).get("intent")}))
     if not detected:
         return {"is_task": False, "reason": "looks like a normal search"}
     # Referential follow-up ("get the tids for the above merchant"): the
@@ -1180,6 +1201,24 @@ def shadow_review_label(req: ShadowReviewLabelRequest):
                                 intent=req.intent)
 
 
+@app.get("/api/audit")
+def audit_endpoint(limit: int = 200, action: str = "", actor: str = ""):
+    """Immutable audit trail (docs/technical-review-2026-08-original.md #1).
+
+    Newest-first entries for every search, profile view, export, and intent
+    execution, plus per-action stats. Append-only by construction — there is
+    no update/delete path anywhere in merchant_intelligence/audit.py.
+    """
+    from merchant_intelligence import audit
+    return {
+        "ok": True,
+        "entries": audit.recent(limit=max(1, min(1000, int(limit))),
+                                action=action or None, actor=actor or None),
+        "stats": audit.stats(),
+        "file": str(audit._path()),
+    }
+
+
 @app.post("/api/task/analyze")
 def task_analyze(req: TaskRequest):
     """Intent-parser debug endpoint (v2): explain WHY a request was routed
@@ -1195,6 +1234,7 @@ def task_analyze(req: TaskRequest):
     text = (req.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
+    _audit("task_analyze", json.dumps({"text": text[:300]}))
     try:
         return tasks.analyze(text)
     except ValueError as exc:
@@ -1578,6 +1618,8 @@ def task_export(req: TaskRequest):
         raise HTTPException(status_code=400, detail=str(exc))
     if not detected:
         raise HTTPException(status_code=400, detail="not a task - nothing to export")
+    _audit("export", json.dumps({"kind": "task", "text": text[:300],
+                                 "intent": detected.get("intent")}))
     result = tasks.execute_task(detected)
     rows = result.get("rows", [])
     columns = result.get("columns", [])
@@ -1602,6 +1644,7 @@ def batch(req: BatchRequest):
     merchants = [m.strip() for m in req.merchants if m.strip()][:1000]
     if not merchants:
         raise HTTPException(status_code=400, detail="merchants is empty")
+    _audit("batch", json.dumps({"count": len(merchants)}))
     t0 = time.perf_counter()
     rows = _run_batch(merchants)
     elapsed = time.perf_counter() - t0
@@ -1623,6 +1666,7 @@ def batch(req: BatchRequest):
 def batch_export(req: BatchRequest):
     merchants = [m.strip() for m in req.merchants if m.strip()][:1000]
     rows = _run_batch(merchants)
+    _audit("export", json.dumps({"kind": "batch", "count": len(rows)}))
     df = pd.DataFrame(rows)
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -1656,6 +1700,7 @@ def quality():
 def quality_export():
     """Export the data quality report as an Excel workbook."""
     from data_quality import run_quality
+    _audit("export", json.dumps({"kind": "quality"}))
     q = run_quality()
     total = q["total"] or 0
     buffer = BytesIO()
@@ -1686,6 +1731,7 @@ def reconcile_endpoint(req: BatchRequest):
     merchants = [m.strip() for m in req.merchants if m.strip()][:1000]
     if not merchants:
         raise HTTPException(status_code=400, detail="merchants is empty")
+    _audit("reconcile", json.dumps({"count": len(merchants)}))
     t0 = time.perf_counter()
     report = run_reconcile(merchants, top_n=3)
     elapsed = time.perf_counter() - t0
@@ -1729,6 +1775,7 @@ def brief(req: ProfileRequest):
     query = req.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
+    _audit("brief", json.dumps({"query": query}))
     profile = get_profiler().build(query, max_members=req.max_members)
     out = build_brief(profile)
     out["query"] = query

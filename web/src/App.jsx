@@ -11,6 +11,7 @@ import RuleEnginePage from './pages/RuleEnginePage'
 import QualityPage from './pages/QualityPage'
 import AliasReviewPage from './pages/AliasReviewPage'
 import ReportBuilderPage from './pages/ReportBuilderPage'
+import AuditPage from './pages/AuditPage'
 import { api } from './api'
 
 const PAGES = [
@@ -75,6 +76,7 @@ export default function App() {
             {page === 'report' && <ReportBuilderPage />}
             {page === 'aliases' && <AliasReviewPage />}
             {page === 'quality' && <QualityPage />}
+            {page === 'audit' && <AuditPage />}
           </div>
         </main>
       </div>

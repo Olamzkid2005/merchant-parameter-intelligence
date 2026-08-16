@@ -9,6 +9,7 @@ const NAV = [
   { key: 'report', label: 'Report Builder', icon: 'description' },
   { key: 'aliases', label: 'Alias Review', icon: 'fact_check' },
   { key: 'quality', label: 'Data Quality', icon: 'analytics' },
+  { key: 'audit', label: 'Audit Trail', icon: 'history' },
 ]
 
 export default function Sidebar({ current, navigate, total }) {

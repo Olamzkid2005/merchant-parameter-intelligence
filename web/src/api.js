@@ -179,6 +179,13 @@ export const api = {
   },
   shadowReviewLabel: (entryId, correct, intent = '', note = '') =>
     post('/shadow/review', { entry_id: entryId, correct, intent, note }),
+  audit: async (limit = 200, action = '') => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (action) params.set('action', action)
+    const res = await fetch(`${BASE}/audit?${params}`)
+    if (!res.ok) throw new Error('Failed to load audit log')
+    return res.json()
+  },
   applySuggestion: (ngram, intent, weight) =>
     post('/feedback/suggestions/apply', { ngram, intent, weight }),
   rejectSuggestion: (ngram, intent) =>

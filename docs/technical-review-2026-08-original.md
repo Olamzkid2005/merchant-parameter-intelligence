@@ -76,6 +76,16 @@ layer, not scattered across `api.py` handlers. Introduce a `security/` module
 with decorators/dependencies; mask at serialization time via a single
 response-shaping layer — this directly prepares the API refactor in #3.
 
+*Status (first slice, shipped): the immutable audit trail —
+`merchant_intelligence/audit.py` (dedicated `data/audit_log.db`, append-only
+by construction, INSERT-only write path; survives merchant-DB rebuilds),
+`GET /api/audit` (entries + per-action stats), wired into every search,
+profile view, intent execution, brief, batch/reconcile, and export endpoint
+as best-effort logging, and an Audit Trail page in the UI (Sidebar → Audit
+Trail). Hermetic coverage in `tests/test_audit.py` (18 checks). AuthN/Z +
+field-level masking remain the next slices — actor currently defaults to
+"local" until the request-scoped identity lands.*
+
 ## 2. Governed Data Platform & Real-Time Ingestion
 
 **Current limitation:** Three SQLite files (`merchant_search.db`,

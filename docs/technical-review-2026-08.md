@@ -133,6 +133,13 @@ threshold is "~9.0", but `config.py:430` sets `DECISIVE_MATCH_THRESHOLD = 85`
 **Effort:** high (2–4 sprints) — but the chokepoints already exist (44 named
 handlers, one DB module per layer), so it is additive wiring, not rework.
 
+> **Status (audit-log slice shipped):** `merchant_intelligence/audit.py`
+> (append-only `data/audit_log.db`, INSERT-only, survives DB rebuilds),
+> `GET /api/audit` + per-action stats, wired into every search / profile /
+> task / brief / batch / reconcile / export endpoint, and an Audit Trail
+> page in the UI. `tests/test_audit.py` (18 hermetic checks). AuthN/Z +
+> masking + tenancy remain.
+
 ## 5. Workstream 2 — Governed Data Platform & Real-Time Ingestion
 
 ### Current state (grounded)
