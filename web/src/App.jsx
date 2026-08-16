@@ -12,6 +12,7 @@ import QualityPage from './pages/QualityPage'
 import AliasReviewPage from './pages/AliasReviewPage'
 import ReportBuilderPage from './pages/ReportBuilderPage'
 import AuditPage from './pages/AuditPage'
+import LoginPage from './pages/LoginPage'
 import { api } from './api'
 
 const PAGES = [
@@ -35,10 +36,31 @@ function currentPage() {
 export default function App() {
   const [page, setPage] = useState(currentPage)
   const [total, setTotal] = useState(0)
+  // null = still loading; otherwise { enabled, authenticated, user?, role? }
+  const [auth, setAuth] = useState(null)
 
   useEffect(() => {
     api.stats().then((d) => setTotal(d.total_records || 0)).catch(() => {})
+    api.authMe().then(setAuth).catch(() => setAuth({ enabled: false, authenticated: false }))
   }, [])
+
+  async function handleLogout() {
+    try {
+      await api.authLogout()
+    } catch { /* non-critical */ }
+    setAuth((a) => ({ ...a, authenticated: false }))
+  }
+
+  if (auth === null) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <p className="font-plex text-[13px] text-on-surface-variant">Loading…</p>
+      </div>
+    )
+  }
+  if (auth.enabled && !auth.authenticated) {
+    return <LoginPage onLogin={() => api.authMe().then(setAuth)} />
+  }
 
   const navigate = (key, extra = {}) => {
     setPage(key)
@@ -61,7 +83,7 @@ export default function App() {
     <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar current={page} navigate={navigate} total={total} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <TopBar current={page} navigate={navigate} />
+        <TopBar current={page} navigate={navigate} auth={auth} onLogout={handleLogout} />
         <main className="flex-1 overflow-y-auto px-8 py-6">
           <div className="mx-auto max-w-[1440px]">
             {page === 'search' && <SearchPage onOpenProfile={(name) => navigate('profile', { q: name })} />}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
+import SecurityCard from '../components/SecurityCard'
 import { intentLabel } from '../utils/intents'
 
 // Verbose display labels for the rule-engine list. Anything not listed here
@@ -596,6 +597,9 @@ export default function RuleEnginePage() {
           </span>
         </div>
       </div>
+
+      {/* Access control (roadmap #1, opt-in) */}
+      <SecurityCard />
 
       {/* Save bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-outline-variant bg-surface-container-lowest px-5 py-3 shadow-sm">

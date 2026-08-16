@@ -179,6 +179,40 @@ export const api = {
   },
   shadowReviewLabel: (entryId, correct, intent = '', note = '') =>
     post('/shadow/review', { entry_id: entryId, correct, intent, note }),
+  authMe: async () => {
+    const res = await fetch(`${BASE}/auth/me`)
+    if (!res.ok) return { enabled: false, authenticated: false }
+    return res.json()
+  },
+  authLogin: (username, password) => post('/auth/login', { username, password }),
+  authLogout: async () => post('/auth/logout', {}),
+  authConfig: async () => {
+    const res = await fetch(`${BASE}/auth/config`)
+    if (!res.ok) throw new Error('Failed to load security config')
+    return res.json()
+  },
+  authSaveConfig: (enabled, sessionTtlHours) =>
+    post('/auth/config', { enabled, session_ttl_hours: sessionTtlHours }),
+  authAddUser: (username, password, role) =>
+    post('/auth/users', { username, password, role }),
+  authRemoveUser: async (username) => {
+    const res = await fetch(`${BASE}/auth/users`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username }),
+    })
+    if (!res.ok) throw new Error('Failed to remove user')
+    return res.json()
+  },
+  authResetPassword: async (username, password) => {
+    const res = await fetch(`${BASE}/auth/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    })
+    if (!res.ok) throw new Error('Failed to reset password')
+    return res.json()
+  },
   audit: async (limit = 200, action = '') => {
     const params = new URLSearchParams({ limit: String(limit) })
     if (action) params.set('action', action)

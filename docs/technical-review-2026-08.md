@@ -133,12 +133,17 @@ threshold is "~9.0", but `config.py:430` sets `DECISIVE_MATCH_THRESHOLD = 85`
 **Effort:** high (2–4 sprints) — but the chokepoints already exist (44 named
 handlers, one DB module per layer), so it is additive wiring, not rework.
 
-> **Status (audit-log slice shipped):** `merchant_intelligence/audit.py`
-> (append-only `data/audit_log.db`, INSERT-only, survives DB rebuilds),
-> `GET /api/audit` + per-action stats, wired into every search / profile /
-> task / brief / batch / reconcile / export endpoint, and an Audit Trail
-> page in the UI. `tests/test_audit.py` (18 hermetic checks). AuthN/Z +
-> masking + tenancy remain.
+> **Status (workstream 1 shipped, opt-in):** (1) the immutable audit trail
+> (`merchant_intelligence/audit.py`, `GET /api/audit`, wired into every
+> search/profile/task/brief/batch/reconcile/export endpoint, Audit Trail UI
+> page; `tests/test_audit.py` 18 checks). (2) AuthN/Z + RBAC + masking
+> (`merchant_intelligence/auth.py`: pbkdf2 hashing, expiring persisted
+> session tokens, viewer<analyst<administrator role matrix matching this
+> section's role split, deep-walk masking of bvn/account/static/phone/email)
+> enforced by an HTTP middleware in api.py, OFF by default with zero
+> behavior change until enabled; session username becomes the audit actor;
+> Login page + Rule Engine Access-control card; `tests/test_auth.py` 27
+> checks). Remaining: tenancy-ready user model + KMS-grade encryption.
 
 ## 5. Workstream 2 — Governed Data Platform & Real-Time Ingestion
 

@@ -76,15 +76,24 @@ layer, not scattered across `api.py` handlers. Introduce a `security/` module
 with decorators/dependencies; mask at serialization time via a single
 response-shaping layer — this directly prepares the API refactor in #3.
 
-*Status (first slice, shipped): the immutable audit trail —
-`merchant_intelligence/audit.py` (dedicated `data/audit_log.db`, append-only
-by construction, INSERT-only write path; survives merchant-DB rebuilds),
-`GET /api/audit` (entries + per-action stats), wired into every search,
-profile view, intent execution, brief, batch/reconcile, and export endpoint
-as best-effort logging, and an Audit Trail page in the UI (Sidebar → Audit
-Trail). Hermetic coverage in `tests/test_audit.py` (18 checks). AuthN/Z +
-field-level masking remain the next slices — actor currently defaults to
-"local" until the request-scoped identity lands.*
+*Status (shipped, opt-in):
+1. Immutable audit trail — `merchant_intelligence/audit.py` (dedicated
+   `data/audit_log.db`, append-only by construction, INSERT-only write
+   path; survives merchant-DB rebuilds), `GET /api/audit` (entries +
+   per-action stats), wired into every search, profile view, intent
+   execution, brief, batch/reconcile, and export endpoint, and an Audit
+   Trail page in the UI. `tests/test_audit.py` (18 checks).
+2. AuthN/Z + RBAC + field-level masking — `merchant_intelligence/auth.py`
+   (pbkdf2 password hashing, expiring opaque session tokens persisted in
+   `data/sessions.json`, role matrix viewer < analyst < administrator
+   mirroring the review's exact surface split, deep-walk field masking of
+   bvn/account_number/static_acc_no/phone/email). Enforced by an HTTP
+   middleware in api.py, OPT-IN (default off — the desktop tool is
+   byte-for-byte unchanged until `enabled` is set). Session username flows
+   into the audit trail as the actor. `GET/POST /api/auth/me|login|logout|
+   config|users|password`; UI: Login page gate + Access-control card on
+   the Rule Engine page. `tests/test_auth.py` (27 checks). Remaining:
+   tenancy-ready `users`/`roles` schema and KMS-grade encryption.*
 
 ## 2. Governed Data Platform & Real-Time Ingestion
 
