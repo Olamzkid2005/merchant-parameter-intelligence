@@ -4,9 +4,16 @@ test_intent_golden.py — Golden-set novelty contract (offline).
 Enforces the Phase-0 contract from docs/hybrid-semantic-intent-layer.md §7
 (and scripts/phase0_baseline.py): every query in
 merchant_intelligence/intent_golden.py must be a NOVEL phrasing — the
-EXPECTED intent must not be reachable by a raw regex match (only the offline
-~semantic/~fuzzy fallback or nothing). A query that literally contains its
-own intent's pattern measures nothing, so it must fail here.
+EXPECTED intent must not be reachable by a HAND-AUTHORED raw regex match
+(only the offline ~semantic/~fuzzy fallback, an auto-synonym pattern, or
+nothing). A query that literally contains its own intent's HAND pattern
+measures nothing, so it must fail here.
+
+Carve-out: auto-synonym patterns (enrichment WEIGHT_SYNONYM = 2) are the
+sanctioned Tier-1 expansion path (design doc §4) — when an approved synonym
+absorbs a golden phrasing, that phrasing is no longer novel BY DESIGN, so
+it is not a violation. The routing-regression snapshot below still freezes
+how the whole system routes it. Mirrors scripts/phase0_baseline.py.
 
 Also guards the set stays well-formed: non-empty, every entry has
 query/intent/note, every expected intent is a live vocab intent (or the
@@ -34,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from merchant_intelligence.intent_golden import INTENT_GOLDEN, intents_covered
 from merchant_intelligence.tasks import analyze
-from merchant_intelligence.tasks.vocab import INTENT_KEYWORDS
+from merchant_intelligence.tasks.vocab import INTENT_KEYWORDS, INTENT_PATTERNS
 
 PASS = 0
 FAIL = 0
@@ -60,6 +67,18 @@ os.environ["SEMANTIC_TIER_MODE"] = "off"
 # check, which inspects matched patterns, does not apply to them.
 _INJECTED = {"segment"}
 VALID = set(INTENT_KEYWORDS) | _INJECTED
+
+# Auto-synonym patterns (enrichment's WEIGHT_SYNONYM = 2) are the SANCTIONED
+# Tier-1 expansion path (design doc §4: human-approved WordNet synonyms merge
+# into the regex tier). A golden phrasing absorbed by one is no longer novel
+# BY DESIGN — the approval deliberately widened regex coverage. The novelty
+# contract therefore applies to hand-authored patterns (weight >= 3): a
+# phrasing that literally hits its own intent's HAND pattern still fails.
+AUTO_WEIGHT = 2
+_AUTO_PATTERNS = {
+    intent: {p for p, w in pats if w == AUTO_WEIGHT}
+    for intent, pats in INTENT_PATTERNS.items()
+}
 
 # ── Routing regression snapshot ───────────────────────────────────────────
 # Committed next to the golden set: query -> how the CURRENT engine routes
@@ -123,7 +142,8 @@ for entry in INTENT_GOLDEN:
     for scored in analysis.get("intents", []):
         if scored["intent"] != expected:
             continue
-        raw = [m for m in scored["matched"] if not m.startswith("~")]
+        raw = [m for m in scored["matched"]
+               if not m.startswith("~") and m not in _AUTO_PATTERNS.get(expected, set())]
         if raw:
             violations.append((text, expected, raw))
 for text, expected, raw in violations:

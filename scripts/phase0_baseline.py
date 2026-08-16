@@ -44,6 +44,7 @@ except (AttributeError, ValueError):
 from merchant_intelligence.intent_golden import INTENT_GOLDEN, intents_covered
 from merchant_intelligence.tasks import analyze
 from merchant_intelligence.tasks import semantic as tier2
+from merchant_intelligence.tasks.vocab import INTENT_PATTERNS
 
 OUTCOMES = ("routed", "clarify", "misroute", "miss")
 
@@ -51,15 +52,29 @@ OUTCOMES = ("routed", "clarify", "misroute", "miss")
 # novelty check (which inspects matched patterns) does not apply to them.
 _INJECTED = {"segment"}
 
+# Auto-synonym patterns (enrichment WEIGHT_SYNONYM = 2) are the sanctioned
+# Tier-1 expansion path (design doc §4): a golden phrasing absorbed by one
+# is no longer novel BY DESIGN, so it is not a novelty violation. The
+# contract applies to hand-authored patterns (weight >= 3). Mirrors
+# tests/test_intent_golden.py.
+AUTO_WEIGHT = 2
+_AUTO_PATTERNS = {
+    intent: {p for p, w in pats if w == AUTO_WEIGHT}
+    for intent, pats in INTENT_PATTERNS.items()
+}
+
 
 def _novelty_violations(text: str, expected: str, analysis: dict) -> list:
-    """Raw-regex matches for the EXPECTED intent (novelty violations)."""
+    """Hand-authored raw-regex matches for the EXPECTED intent (novelty
+    violations). Auto-synonym matches (weight 2) don't count — absorbing a
+    novel phrasing into Tier 1 is the enrichment layer's purpose."""
     if expected in _INJECTED:
         return []
     for entry in analysis.get("intents", []):
         if entry["intent"] != expected:
             continue
-        raw = [m for m in entry["matched"] if not m.startswith("~")]
+        raw = [m for m in entry["matched"]
+               if not m.startswith("~") and m not in _AUTO_PATTERNS.get(expected, set())]
         if raw:
             return raw
     return []

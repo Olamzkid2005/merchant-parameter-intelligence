@@ -67,6 +67,18 @@
         {
           "pattern": "\\baliases?\\b",
           "weight": 3
+        },
+        {
+          "pattern": "\\balias\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bcollectable\\ account\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bcollectible\\ account\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -123,6 +135,14 @@
         {
           "pattern": "\\be[- ]?mails?\\b",
           "weight": 5
+        },
+        {
+          "pattern": "\\bmail\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bpost\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -149,6 +169,10 @@
         {
           "pattern": "\\bwhat(?:'s| is)? (?:the )?banks?\\b",
           "weight": 6
+        },
+        {
+          "pattern": "\\bdeposit\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -265,6 +289,22 @@
         {
           "pattern": "\\baliases?\\b",
           "weight": 5
+        },
+        {
+          "pattern": "\\bassumed\\ name\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bassumed\\ name\\ codes\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bfalse\\ name\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bfalse\\ name\\ codes\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -321,6 +361,10 @@
         {
           "pattern": "\\bstate\\b",
           "weight": 3
+        },
+        {
+          "pattern": "\\bcountry\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -341,6 +385,10 @@
         {
           "pattern": "\\bsources?\\b",
           "weight": 3
+        },
+        {
+          "pattern": "\\borigin\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -427,6 +475,54 @@
         {
           "pattern": "\\bnew address\\b",
           "weight": 4
+        },
+        {
+          "pattern": "\\balter\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bformer\\ account\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bformer\\ address\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bformer\\ bank\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bfresh\\ account\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bmodify\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bolder\\ account\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bprevious\\ account\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bprevious\\ address\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bprevious\\ bank\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bshift\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bswitch\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -518,6 +614,14 @@
         {
           "pattern": "\\bnumber of\\b",
           "weight": 4
+        },
+        {
+          "pattern": "\\btally\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\btotal\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -545,6 +649,18 @@
         {
           "pattern": "\\brepeated\\b",
           "weight": 5
+        },
+        {
+          "pattern": "\\bdouble\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\brepeat\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\breplicate\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -612,6 +728,30 @@
         {
           "pattern": "\\bassociated\\b",
           "weight": 6
+        },
+        {
+          "pattern": "\\bassociate\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\battached\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bconnect\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bjoined\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\blink\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\brelate\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -676,6 +816,10 @@
         {
           "pattern": "\\bdifference between\\b",
           "weight": 5
+        },
+        {
+          "pattern": "\\bcomparison\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -720,6 +864,22 @@
         {
           "pattern": "\\bwithout\\b",
           "weight": 6
+        },
+        {
+          "pattern": "\\black\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bmiss\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bomit\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\buncomplete\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -758,6 +918,14 @@
         {
           "pattern": "\\bmost popular\\b",
           "weight": 5
+        },
+        {
+          "pattern": "\\border\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\brank\\b",
+          "weight": 2
         }
       ],
       "keywords": [
@@ -790,6 +958,18 @@
         {
           "pattern": "\\bvalid\\b",
           "weight": 4
+        },
+        {
+          "pattern": "\\baffirm\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\bassert\\b",
+          "weight": 2
+        },
+        {
+          "pattern": "\\brecord\\b",
+          "weight": 2
         }
       ],
       "keywords": [

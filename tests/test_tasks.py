@@ -1947,7 +1947,12 @@ check("PUT rejects unknown intent", s_unk == 404, f"{s_unk} {b_unk}")
 # Round-trip: add a test pattern, verify the API hot-reloaded it (its process
 # never restarted), verify the file persisted for a fresh import, then restore.
 from merchant_intelligence.tasks import vocab as _vocab
-orig = cfg_int["intents"]["email"]
+# Snapshot `orig` from the FILE, not the live-process response: the app may
+# have been started before an out-of-band config change (e.g. the enrichment
+# CLI merge), so its in-memory copy can be stale — restoring from it would
+# clobber newer patterns (mail/post) and break the defaults parity check.
+_vocab.reload_intents()
+orig = _vocab._INTENT_CONFIG["intents"]["email"]
 # Patterns match against the LOWERCASED request (the engine lowercases the
 # text before scoring), so test patterns must be lowercase too.
 extra = {"pattern": "\\bget-only-my-code\\b", "weight": 9}

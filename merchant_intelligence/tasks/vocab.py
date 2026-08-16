@@ -33,125 +33,230 @@ ID_KINDS = ("tid", "mxcode", "phone", "email", "account", "static",
 # a task on its own. Keep INTENT_KEYWORDS (plain lists) for the LLM prompt
 # and result validation.
 _DEFAULT_INTENT_PATTERNS: Dict[str, List[Tuple[str, int]]] = {
-    "static_account": [
-        (r"\bstatic account\b", 8), (r"\bstatic acct\b", 8),
-        (r"\bstatic acc\b", 8), (r"\bstatic acct manager\b", 8),
-        (r"\bbeneficiary name\b", 7), (r"\bstatic bank\b", 7),
-        (r"\bbeneficiary\b", 6), (r"\bacct manager\b", 6),
-        (r"\baccount manager\b", 5), (r"\bpayable code\b", 6),
-        (r"\bpayables?\b", 4), (r"\bmapped to\b", 3), (r"\baliases?\b", 3),
+    'account_name': [
+        (r"\baccount names?\b", 6),
+        (r"\baccount holder\b", 5),
     ],
-    "mxcode": [
-        (r"\bmx[- ]?codes?\b", 6), (r"\bmerchant code\b", 5),
+    'account_number': [
+        (r"\baccount numbers?\b", 6),
+        (r"\bacc numbers?\b", 5),
     ],
-    "tid": [
-        (r"\bterminal ids?\b", 6), (r"\btids?\b", 4),
+    'address': [
+        (r"\baddress(?:es)?\b", 5),
+        (r"\blocations?\b", 5),
     ],
-    "email": [(r"\be[- ]?mails?\b", 5)],
-    # Question-form field requests ("which bank does X use", "what is the
-    # bank for X") — the bare field word stays weak so a merchant named
-    # "BANK OF INDUSTRY" never misroutes, but the question phrases are
-    # unambiguous requests and score high enough to clear the 40 gate.
-    "bank": [
-        (r"\bbank names?\b", 6), (r"\bbanks?\b", 3),
-        (r"\bwhich banks?\b", 6), (r"\bwhat(?:'s| is)? (?:the )?banks?\b", 6),
+    'alias': [
+        (r"\balias codes?\b", 6),
+        (r"\baliases?\b", 5),
+        (r"\bassumed\ name\b", 2),
+        (r"\bassumed\ name\ codes\b", 2),
+        (r"\bfalse\ name\b", 2),
+        (r"\bfalse\ name\ codes\b", 2),
     ],
-    "phone": [
-        (r"\bphone numbers?\b", 6), (r"\bmobile numbers?\b", 6),
-        (r"\btelephones?\b", 5), (r"\bphones?\b", 5),
+    'bank': [
+        (r"\bbank names?\b", 6),
+        (r"\bbanks?\b", 3),
+        (r"\bwhich banks?\b", 6),
+        (r"\bwhat(?:'s| is)? (?:the )?banks?\b", 6),
+        (r"\bdeposit\b", 2),
     ],
-    "address": [
-        (r"\baddress(?:es)?\b", 5), (r"\blocations?\b", 5),
-    ],
-    "account_name": [
-        (r"\baccount names?\b", 6), (r"\baccount holder\b", 5),
-    ],
-    "account_number": [
-        (r"\baccount numbers?\b", 6), (r"\bacc numbers?\b", 5),
-    ],
-    "payable": [
-        (r"\bpayable codes?\b", 6), (r"\bpayables?\b", 5),
-    ],
-    "alias": [
-        (r"\balias codes?\b", 6), (r"\baliases?\b", 5),
-    ],
-    "contact": [
-        (r"\bcontact (?:person|persons|name|names)\b", 5), (r"\bcontacts?\b", 4),
-    ],
-    "onboarded": [
-        (r"\bonboarded?\b", 6), (r"\bonboarding date\b", 6),
-    ],
-    "state": [
-        (r"\bwhich state\b", 5), (r"\bwhat state\b", 5), (r"\bstate\b", 3),
-    ],
-    "source": [
-        (r"\bwhich (?:file|sheet)\b", 5), (r"\bwhat (?:file|sheet)\b", 5),
-        (r"\bsources?\b", 3),
-    ],
-    "beneficiary": [
+    'beneficiary': [
         (r"\bbeneficiar(?:y|ies)\b", 5),
     ],
-    "change_details": [
-        (r"\bchange of account\b", 8), (r"\bchange of merchant\b", 8),
-        (r"\bchange details\b", 7), (r"\baccount change\b", 7),
-        (r"\bmerchant change\b", 7), (r"\bchanged account\b", 7),
-        (r"\bchange history\b", 7), (r"\bchanged from\b", 6),
-        (r"\bchanged to\b", 6), (r"\baccount details\b", 4),
-        (r"\bold account\b", 4), (r"\bnew account\b", 4),
-        (r"\bold bank\b", 4), (r"\bnew bank\b", 4),
-        (r"\bold address\b", 4), (r"\bnew address\b", 4),
+    'change_details': [
+        (r"\bchange of account\b", 8),
+        (r"\bchange of merchant\b", 8),
+        (r"\bchange details\b", 7),
+        (r"\baccount change\b", 7),
+        (r"\bmerchant change\b", 7),
+        (r"\bchanged account\b", 7),
+        (r"\bchange history\b", 7),
+        (r"\bchanged from\b", 6),
+        (r"\bchanged to\b", 6),
+        (r"\baccount details\b", 4),
+        (r"\bold account\b", 4),
+        (r"\bnew account\b", 4),
+        (r"\bold bank\b", 4),
+        (r"\bnew bank\b", 4),
+        (r"\bold address\b", 4),
+        (r"\bnew address\b", 4),
+        (r"\balter\b", 2),
+        (r"\bformer\ account\b", 2),
+        (r"\bformer\ address\b", 2),
+        (r"\bformer\ bank\b", 2),
+        (r"\bfresh\ account\b", 2),
+        (r"\bmodify\b", 2),
+        (r"\bolder\ account\b", 2),
+        (r"\bprevious\ account\b", 2),
+        (r"\bprevious\ address\b", 2),
+        (r"\bprevious\ bank\b", 2),
+        (r"\bshift\b", 2),
+        (r"\bswitch\b", 2),
     ],
-    "profile": [
+    'compare': [
+        (r"\bcompare\b", 8),
+        (r"\bversus\b", 6),
+        (r"\bvs\.?\b", 5),
+        (r"\bside.by.side\b", 6),
+        (r"\bdifference between\b", 5),
+        (r"\bcomparison\b", 2),
+    ],
+    'contact': [
+        (r"\bcontact (?:person|persons|name|names)\b", 5),
+        (r"\bcontacts?\b", 4),
+    ],
+    'count': [
+        (r"\bhow many\b", 9),
+        (r"\btotal number of\b", 8),
+        (r"\bcount\b", 7),
+        (r"\bhow often\b", 6),
+        (r"\bnumber of\b", 4),
+        (r"\btally\b", 2),
+        (r"\btotal\b", 2),
+    ],
+    'coverage': [
+        (r"\bcoverage\b", 6),
+        (r"\bmissing\b", 6),
+        (r"\bwith no\b", 6),
+        (r"\bhas no\b", 6),
+        (r"\bhave no\b", 6),
+        (r"\blacking\b", 6),
+        (r"\bincomplete\b", 5),
+        (r"\bwithout\b", 6),
+        (r"\black\b", 2),
+        (r"\bmiss\b", 2),
+        (r"\bomit\b", 2),
+        (r"\buncomplete\b", 2),
+    ],
+    'duplicates': [
+        (r"\bduplicates?\b", 8),
+        (r"\bappears? more than once\b", 7),
+        (r"\bsame merchant\b", 6),
+        (r"\brepeated\b", 5),
+        (r"\bdouble\b", 2),
+        (r"\brepeat\b", 2),
+        (r"\breplicate\b", 2),
+    ],
+    'email': [
+        (r"\be[- ]?mails?\b", 5),
+        (r"\bmail\b", 2),
+        (r"\bpost\b", 2),
+    ],
+    'formerly': [
+        (r"\bformerly\b", 7),
+        (r"\brenamed\b", 6),
+        (r"\bname variants?\b", 6),
+        (r"\bpreviously known\b", 6),
+        (r"\bknown as\b", 5),
+    ],
+    'mxcode': [
+        (r"\bmx[- ]?codes?\b", 6),
+        (r"\bmerchant code\b", 5),
+    ],
+    'onboarded': [
+        (r"\bonboarded?\b", 6),
+        (r"\bonboarding date\b", 6),
+    ],
+    'payable': [
+        (r"\bpayable codes?\b", 6),
+        (r"\bpayables?\b", 5),
+    ],
+    'phone': [
+        (r"\bphone numbers?\b", 6),
+        (r"\bmobile numbers?\b", 6),
+        (r"\btelephones?\b", 5),
+        (r"\bphones?\b", 5),
+    ],
+    'profile': [
         (r"\bfull profile\b", 7),
         (r"\beverything (?:about|on|for|regarding)\b", 6),
         (r"\beverything\b", 4),
         (r"\banything (?:about|on|for)\b", 5),
-        (r"\ball the information\b", 6), (r"\bprofile\b", 6),
-        (r"\binformation\b", 4), (r"\bdetails?\b", 3), (r"\binfo\b", 3),
+        (r"\ball the information\b", 6),
+        (r"\bprofile\b", 6),
+        (r"\binformation\b", 4),
+        (r"\bdetails?\b", 3),
+        (r"\binfo\b", 3),
     ],
-    "count": [
-        (r"\bhow many\b", 9), (r"\btotal number of\b", 8),
-        (r"\bcount\b", 7), (r"\bhow often\b", 6), (r"\bnumber of\b", 4),
+    'related': [
+        (r"\bwho else\b", 8),
+        (r"\buses this\b", 8),
+        (r"\brelated\b", 7),
+        (r"\blinked to\b", 7),
+        (r"\bconnected\b", 6),
+        (r"\bassociated\b", 6),
+        (r"\bassociate\b", 2),
+        (r"\battached\b", 2),
+        (r"\bconnect\b", 2),
+        (r"\bjoined\b", 2),
+        (r"\blink\b", 2),
+        (r"\brelate\b", 2),
     ],
-    "duplicates": [
-        (r"\bduplicates?\b", 8), (r"\bappears? more than once\b", 7),
-        (r"\bsame merchant\b", 6), (r"\brepeated\b", 5),
+    'source': [
+        (r"\bwhich (?:file|sheet)\b", 5),
+        (r"\bwhat (?:file|sheet)\b", 5),
+        (r"\bsources?\b", 3),
+        (r"\borigin\b", 2),
     ],
-    "summary": [
-        (r"\bsummar[a-z]*\b", 8), (r"\boverview\b", 7),
-        (r"\bhigh.level\b", 6), (r"\bbreakdown\b", 6), (r"\bstats?\b", 5),
+    'state': [
+        (r"\bwhich state\b", 5),
+        (r"\bwhat state\b", 5),
+        (r"\bstate\b", 3),
+        (r"\bcountry\b", 2),
     ],
-    "related": [
-        (r"\bwho else\b", 8), (r"\buses this\b", 8),
-        (r"\brelated\b", 7), (r"\blinked to\b", 7),
-        (r"\bconnected\b", 6), (r"\bassociated\b", 6),
+    'static_account': [
+        (r"\bstatic account\b", 8),
+        (r"\bstatic acct\b", 8),
+        (r"\bstatic acc\b", 8),
+        (r"\bstatic acct manager\b", 8),
+        (r"\bbeneficiary name\b", 7),
+        (r"\bstatic bank\b", 7),
+        (r"\bbeneficiary\b", 6),
+        (r"\bacct manager\b", 6),
+        (r"\baccount manager\b", 5),
+        (r"\bpayable code\b", 6),
+        (r"\bpayables?\b", 4),
+        (r"\bmapped to\b", 3),
+        (r"\baliases?\b", 3),
+        (r"\balias\b", 2),
+        (r"\bcollectable\ account\b", 2),
+        (r"\bcollectible\ account\b", 2),
     ],
-    "formerly": [
-        (r"\bformerly\b", 7), (r"\brenamed\b", 6),
-        (r"\bname variants?\b", 6), (r"\bpreviously known\b", 6),
-        (r"\bknown as\b", 5),
+    'summary': [
+        (r"\bsummar[a-z]*\b", 8),
+        (r"\boverview\b", 7),
+        (r"\bhigh.level\b", 6),
+        (r"\bbreakdown\b", 6),
+        (r"\bstats?\b", 5),
     ],
-    "compare": [
-        (r"\bcompare\b", 8), (r"\bversus\b", 6),
-        (r"\bvs\.?\b", 5), (r"\bside.by.side\b", 6),
-        (r"\bdifference between\b", 5),
+    'tid': [
+        (r"\bterminal ids?\b", 6),
+        (r"\btids?\b", 4),
     ],
-    "coverage": [
-        (r"\bcoverage\b", 6), (r"\bmissing\b", 6),
-        (r"\bwith no\b", 6), (r"\bhas no\b", 6),
-        (r"\bhave no\b", 6), (r"\blacking\b", 6),
-        (r"\bincomplete\b", 5), (r"\bwithout\b", 6),
+    'top': [
+        (r"\btop \d+\b", 7),
+        (r"\bmost common\b", 6),
+        (r"\bper state\b", 5),
+        (r"\bby state\b", 5),
+        (r"\branking\b", 5),
+        (r"\bmost popular\b", 5),
+        (r"\border\b", 2),
+        (r"\brank\b", 2),
     ],
-    "top": [
-        (r"\btop \d+\b", 7), (r"\bmost common\b", 6),
-        (r"\bper state\b", 5), (r"\bby state\b", 5),
-        (r"\branking\b", 5), (r"\bmost popular\b", 5),
-    ],
-    "verify": [
-        (r"\bin the registry\b", 6), (r"\bin the database\b", 5),
-        (r"\bverify\b", 6), (r"\bregistered\b", 5), (r"\bvalid\b", 4),
+    'verify': [
+        (r"\bin the registry\b", 6),
+        (r"\bin the database\b", 5),
+        (r"\bverify\b", 6),
+        (r"\bregistered\b", 5),
+        (r"\bvalid\b", 4),
+        (r"\baffirm\b", 2),
+        (r"\bassert\b", 2),
+        (r"\brecord\b", 2),
     ],
 }
+
+
+
 
 # ── Config loading (intents.json, tunable without code) ───────────────────
 # The live INTENT_PATTERNS / INTENT_KEYWORDS come from the JSON file next to
