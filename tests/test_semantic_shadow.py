@@ -58,6 +58,12 @@ def _restore_env(saved):
 # of whether an ONNX model artifact exists on this machine (the ONNX path is
 # covered separately by the baseline measurement + export probe).
 os.environ.setdefault("MERCHANT_TIER2_ENCODER", "hash")
+# Hermetic: never read the machine's persisted engine settings (data/
+# engine_settings.json may legitimately hold a saved mode from real use) —
+# point the knob at a temp, empty file so every check sees the defaults.
+os.environ.setdefault(
+    "ENGINE_SETTINGS_FILE",
+    str(Path(tempfile.mkdtemp(prefix="ss_knob_")) / "settings.json"))
 
 
 # ── [1] settings knob ─────────────────────────────────────────────────────
@@ -196,6 +202,51 @@ try:
           len(semantic.read_shadow()) >= 2, f"{len(semantic.read_shadow())}")
 finally:
     _restore_env(_saved)
+
+# ── Versioned embedding artifacts (design doc §9) ────────────────────────
+# Precomputed exemplar vectors persist to data/exemplar_embeddings_<enc>_<fp>.
+# npy so a restart cold-starts from disk instead of re-encoding ~190 phrases.
+print("\n[10] versioned embedding artifact (round-trip + staleness)")
+from merchant_intelligence import config as _config
+_old_dir = _config.DATA_DIR
+_tmp_dir = Path(tempfile.mkdtemp(prefix="emb_art_"))
+_config.DATA_DIR = _tmp_dir
+try:
+    _ex = {"tid": ["get the device ids", "terminal ids please"],
+           "bank": ["which bank"]}
+    _enc = semantic._make_encoder()
+    _v1 = semantic._get_exemplar_vecs(_ex, _enc)
+    _fp = semantic._fingerprint(_ex)
+    _art = semantic._exemplar_vecs_path(_enc.id, _fp)
+    check("artifact written, versioned by encoder + fingerprint",
+          _art.exists() and _art.with_suffix(".json").exists(),
+          _art.name)
+    check("filename embeds encoder id", _enc.id in _art.name)
+    # Cold reload: drop the in-memory cache, must read from disk.
+    semantic._exemplar_vecs.clear()
+    _v2 = semantic._get_exemplar_vecs(_ex, _enc)
+    check("cold reload reads the artifact", _v2 is not None
+          and len(_v2.get("tid", [])) == 2)
+    _c1 = semantic._cosine(_enc.encode(["get the device ids"])[0],
+                           _v2["tid"][0][1])
+    check("reloaded vectors functionally match (cosine ~1.0)",
+          round(_c1, 3) == 1.0, repr(_c1))
+    # Staleness: an exemplar edit produces a NEW fingerprint + artifact.
+    _ex2 = dict(_ex)
+    _ex2["tid"] = _ex["tid"] + ["brand new phrase here"]
+    semantic._exemplar_vecs.clear()
+    _v3 = semantic._get_exemplar_vecs(_ex2, _enc)
+    _art2 = semantic._exemplar_vecs_path(_enc.id, semantic._fingerprint(_ex2))
+    check("exemplar edit rebuilds a distinct artifact",
+          _art2.exists() and _art2 != _art and len(_v3["tid"]) == 3,
+          f"{_art.name} vs {_art2.name}")
+    # Corruption: a mangled sidecar must not crash the load path.
+    _art.with_suffix(".json").write_text("not json", encoding="utf-8")
+    semantic._exemplar_vecs.clear()
+    check("corrupt sidecar -> None, no crash",
+          semantic._load_exemplar_vecs((_fp, _enc.id), _ex, _enc) is None)
+finally:
+    _config.DATA_DIR = _old_dir
 
 print(f"\n  {PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

@@ -370,7 +370,7 @@ python tests/test_identifier_search.py# identifier (phone/MX/TID/email) search
 python tests/test_feedback.py         # self-improvement loop
 python tests/test_new_features.py     # API feature smoke tests
 python tests/test_next_level.py       # LLM brief + self-improve harness
-python tests/test_semantic_shadow.py  # Tier-2 semantic layer (offline, shadow mode)
+python tests/test_semantic_shadow.py  # Tier-2 semantic layer (offline, shadow mode; hermetic ENGINE_SETTINGS_FILE)
 python tests/test_intent_golden.py    # golden-set novelty contract (offline)
 python tests/test_enrichment.py       # Tier-1 WordNet enrichment pipeline (hermetic: fake synsets + temp config)
 python tests/test_shadow_review.py    # Tier-2 §7 spot-check tooling + Phase-3 fit_tier2 gates (hermetic: temp shadow + review files)

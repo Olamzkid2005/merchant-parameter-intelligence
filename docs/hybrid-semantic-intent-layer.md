@@ -133,6 +133,7 @@ Serving requirements (Phase 0 deliverables):
 - `lru_cache` on `semantic.resolve(query)`.
 - `app.start` preflight auto-downloads model + corpus if missing.
 - Embedding artifacts versioned by model+version in the filename (`exemplar_embeddings_<model>_<version>.npy`); `semantic.py` rebuilds on mismatch.
+  *Status: DONE — `app.start` now auto-downloads the ONNX model (`scripts/export_embedding_model.py`) and the WordNet corpus (`enrichment.ensure_wordnet()`, with a direct-zip fallback when nltk's downloader silently no-ops) whenever the deps exist but the artifact is missing; skipped when `MERCHANT_TIER2_ENCODER=hash` is forced, never blocks startup. Exemplar vectors persist to `data/exemplar_embeddings_<encoder>_<fingerprint>.npy` + a JSON sidecar (row layout); `semantic._get_exemplar_vecs()` loads the artifact on cold start (a restart no longer re-encodes ~190 phrases) and rebuilds a fresh artifact when the exemplar fingerprint or encoder changes — stale/corrupt artifacts are detected and recomputed. Coverage in `tests/test_semantic_shadow.py` (round-trip, staleness, corruption).*
 
 **Data is gitignored — say so, don't imply otherwise.** `data/` (where `exemplars.json` and `auto_pattern_manifest.json` live) is gitignored, same as `manual_aliases.json` today. "Auditable, diffable" holds at the application/review-UI layer and locally on disk — not in git history. State this explicitly rather than letting "auditable, diffable" imply version control.
 
@@ -170,9 +171,9 @@ scripts/
                             #       self-check + routed/clarify/misroute/miss;
                             #       --tier2 adds the Phase-1 preview)
 tests/
-  test_semantic_shadow.py   # DONE — offline Phase-1 tests (22 checks): knob,
+  test_semantic_shadow.py   # DONE — offline Phase-1 tests (28 checks): knob,
                             #       exemplars, masking, resolve, off/shadow/
-                            #       enabled hook behavior
+                            #       enabled hook behavior + §9 artifact round-trip
 data/                       # gitignored — see §9
   exemplars.json
   exemplar_embeddings_<model>_<version>.npy

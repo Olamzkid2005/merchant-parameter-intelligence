@@ -131,6 +131,53 @@ def wordnet_status() -> Dict[str, Any]:
     }
 
 
+def ensure_wordnet(timeout: int = 120) -> Dict[str, Any]:
+    """Best-effort download of the wordnet corpus (app.start preflight).
+
+    nltk's own downloader can silently no-op on some setups (claims "already
+    up to date" without extracting), so this falls back to fetching the
+    corpus zip directly from the nltk_data repo and extracting it into
+    nltk.data.path[0]. Never raises — startup must not block on a corpus.
+    Returns {"ok": bool, "already": bool, ...} for the preflight to report.
+    """
+    try:
+        import nltk  # noqa: F401
+    except Exception:
+        return {"ok": False, "reason": "nltk not installed",
+                "hint": "python -m pip install nltk"}
+    try:
+        nltk.data.find("corpora/wordnet")
+        return {"ok": True, "already": True}
+    except Exception:
+        pass
+    # Attempt 1: the standard downloader (quiet, no interactive prompts).
+    try:
+        nltk.download("wordnet", quiet=True, raise_on_error=True)
+        nltk.data.find("corpora/wordnet")
+        return {"ok": True, "already": False, "via": "nltk.download"}
+    except Exception:
+        pass
+    # Attempt 2: direct zip fetch + extract into nltk.data.path[0].
+    try:
+        import io
+        import urllib.request
+        import zipfile
+        url = ("https://raw.githubusercontent.com/nltk/nltk_data/"
+               "gh-pages/packages/corpora/wordnet.zip")
+        req = urllib.request.Request(url, headers={"User-Agent": "merchant-param"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = resp.read()
+        dest = Path(nltk.data.path[0]) / "corpora"
+        dest.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            zf.extractall(dest)
+        nltk.data.find("corpora/wordnet")
+        return {"ok": True, "already": False, "via": "direct"}
+    except Exception as exc:
+        return {"ok": False, "reason": str(exc)[:200],
+                "hint": "python -c \"import nltk; nltk.download('wordnet')\""}
+
+
 # ── Source phrase extraction (cold start, §5 Phase A) ─────────────────────
 
 _SOURCE_STOP = frozenset({

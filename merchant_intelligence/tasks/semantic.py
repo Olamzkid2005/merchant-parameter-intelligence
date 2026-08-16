@@ -328,8 +328,106 @@ def _cosine(a, b) -> float:
 # encoder); a module-level cache makes it a one-time cost per process and
 # per config change. Keyed on the exemplar fingerprint + encoder id so a
 # hot-reload or model swap rebuilds automatically.
+#
+# Phase-0 serving requirement (design doc §9): the vectors are ALSO persisted
+# to a versioned artifact, data/exemplar_embeddings_<encoder>_<fingerprint>.npy
+# (+ a JSON sidecar with the row layout). A restart then cold-starts from
+# disk instead of re-encoding ~190 phrases — the version is the exemplar
+# fingerprint + encoder id baked into the filename, so a model swap or an
+# exemplar edit builds a fresh artifact and never serves stale vectors.
 _exemplar_vecs: Dict[Tuple[str, str], Dict[str, List[Tuple[str, Any]]]] = {}
 _exemplar_vecs_lock = threading.Lock()
+
+
+def _exemplar_vecs_path(encoder_id: str, fingerprint: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", encoder_id)
+    return config.DATA_DIR / f"exemplar_embeddings_{safe}_{fingerprint}.npy"
+
+
+def _to_dense(v, dim: int):
+    """Vector -> dense numpy row (dict form for the hashing encoder, ndarray
+    for the ONNX encoder) so every encoder persists through the same .npy."""
+    import numpy as np
+    if hasattr(v, "ndim"):
+        return np.asarray(v, dtype=np.float32)
+    arr = np.zeros(dim, dtype=np.float32)
+    for k, val in v.items():
+        arr[int(k) % dim] = val
+    return arr
+
+
+def _from_stored(v, enc):
+    """Dense row back into the encoder's native form (sparse dict for the
+    hashing encoder, ndarray for ONNX) so _cosine always sees a consistent
+    representation."""
+    if getattr(enc, "model_id", None) is not None:  # ONNX -> keep dense
+        return v
+    arr = v
+    out = {}
+    for idx in range(len(arr)):
+        val = float(arr[idx])
+        if val:
+            out[idx] = val
+    return out
+
+
+def _save_exemplar_vecs(key, vecs) -> None:
+    """Persist precomputed vectors to the versioned .npy artifact (+ sidecar).
+    Best-effort: an unwritable dir or missing numpy must never break resolve."""
+    try:
+        import numpy as np
+        rows = [(intent, ph, v)
+                for intent, pairs in vecs.items() for ph, v in pairs]
+        if not rows:
+            return
+        dim = len(rows[0][2]) if hasattr(rows[0][2], "ndim") else 1024
+        dense = np.stack([_to_dense(v, dim) for _, _, v in rows])
+        sidecar = {
+            "encoder": key[1],
+            "fingerprint": key[0],
+            "layout": [{"intent": i, "phrase": p} for i, p, _ in rows],
+        }
+        path = _exemplar_vecs_path(key[1], key[0])
+        if path.exists():
+            return  # already persisted this version
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(str(path), dense)
+        path.with_suffix(".json").write_text(
+            json.dumps(sidecar), encoding="utf-8")
+    except Exception as exc:
+        logger.debug("exemplar embedding persistence skipped: %s", exc)
+
+
+def _load_exemplar_vecs(key, exemplars, enc):
+    """Read the versioned artifact for (encoder, fingerprint), or None when
+    missing/stale/corrupt — then the caller recomputes and re-persists."""
+    try:
+        import numpy as np
+        path = _exemplar_vecs_path(key[1], key[0])
+        sidecar_path = path.with_suffix(".json")
+        if not (path.exists() and sidecar_path.exists()):
+            return None
+        side = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        if side.get("encoder") != key[1] or side.get("fingerprint") != key[0]:
+            return None
+        dense = np.load(str(path))
+        layout = side["layout"]
+        if dense.shape[0] != len(layout):
+            return None
+        # The artifact must cover EVERY exemplar phrase — anything less means
+        # it predates an exemplar edit and is stale despite the fingerprint.
+        need = {(i, p) for i, ph in exemplars.items() for p in ph}
+        have = {(m["intent"], m["phrase"]) for m in layout}
+        if need != have:
+            return None
+        out: Dict[str, List[Tuple[str, Any]]] = {}
+        for meta, vec in zip(layout, dense):
+            out.setdefault(meta["intent"], []).append(
+                (meta["phrase"], _from_stored(vec, enc)))
+        return out
+    except Exception as exc:
+        logger.debug("exemplar embedding load skipped: %s", exc)
+        return None
 
 
 def _get_exemplar_vecs(exemplars: Dict[str, List[str]], enc) \
@@ -341,10 +439,13 @@ def _get_exemplar_vecs(exemplars: Dict[str, List[str]], enc) \
     with _exemplar_vecs_lock:
         cached = _exemplar_vecs.get(key)
         if cached is None:
-            cached = {
-                intent: list(zip(phrases, enc.encode(phrases)))
-                for intent, phrases in exemplars.items()
-            }
+            cached = _load_exemplar_vecs(key, exemplars, enc)
+            if cached is None:
+                cached = {
+                    intent: list(zip(phrases, enc.encode(phrases)))
+                    for intent, phrases in exemplars.items()
+                }
+                _save_exemplar_vecs(key, cached)
             _exemplar_vecs[key] = cached
     return cached
 

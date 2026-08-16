@@ -34,6 +34,7 @@ service's health endpoint until ready, prints READY URLs, and stays attached
 so Ctrl+C shuts both down.
 """
 import argparse
+import os
 import re
 import shutil
 import socket
@@ -257,8 +258,29 @@ def preflight(args):
         has_model = bool(model_dir.exists()) and any(
             (model_dir / d / "model.onnx").exists()
             for d in model_dir.iterdir() if d.is_dir())
+        # Auto-download the ONNX model when the deps exist but the artifact
+        # is missing (design doc §9 serving requirement). Skipped when the
+        # user forced the hashing encoder, and never blocks startup — offline
+        # machines just keep the hashing fallback with a clear message.
+        forced_hash = os.environ.get("MERCHANT_TIER2_ENCODER") == "hash"
         if has_t2deps and has_model:
             print("  [OK] tier-2 encoder: ONNX model + deps present")
+        elif has_t2deps and not forced_hash:
+            print("  [..] tier-2 encoder: model missing — downloading "
+                  "(scripts/export_embedding_model.py)…")
+            dl = subprocess.run(
+                [str(VENV_PY), "scripts/export_embedding_model.py"],
+                capture_output=True, text=True, cwd=str(ROOT), timeout=600)
+            has_model = bool(model_dir.exists()) and any(
+                (model_dir / d / "model.onnx").exists()
+                for d in model_dir.iterdir() if d.is_dir())
+            if has_model:
+                print("  [OK] tier-2 encoder: ONNX model downloaded")
+            else:
+                tail = (dl.stdout or dl.stderr or "").strip().splitlines()
+                print("  [..] tier-2 encoder: model download failed "
+                      "(offline?) — hashing fallback active"
+                      + (f" ({tail[-1][:120]})" if tail else ""))
         else:
             print("  [..] tier-2 encoder: hashing fallback active "
                   "(optional — python scripts/export_embedding_model.py)")
@@ -273,8 +295,21 @@ def preflight(args):
         if (wn.stdout or "").strip() == "True":
             print("  [OK] tier-1 enrichment: nltk + wordnet corpus present")
         else:
-            print("  [..] tier-1 enrichment: wordnet unavailable "
-                  "(optional — pip install nltk + download wordnet)")
+            # Auto-download the corpus (design doc §9 — same treatment as the
+            # model weights). ensure_wordnet falls back to a direct zip fetch
+            # when nltk's downloader silently no-ops; never blocks startup.
+            print("  [..] tier-1 enrichment: wordnet missing — downloading…")
+            wnd = subprocess.run(
+                [str(VENV_PY), "-c",
+                 "from merchant_intelligence.tasks.enrichment import "
+                 "ensure_wordnet; import sys; "
+                 "print('OK' if ensure_wordnet().get('ok') else 'NO')"],
+                capture_output=True, text=True, cwd=str(ROOT), timeout=240)
+            if (wnd.stdout or "").strip().splitlines()[-1:] == ["OK"]:
+                print("  [OK] tier-1 enrichment: wordnet corpus downloaded")
+            else:
+                print("  [..] tier-1 enrichment: wordnet download failed "
+                      "(offline?) — propose stage degrades gracefully")
 
     if not args.no_web:
         if not (WEB_DIR / "node_modules").exists():
