@@ -353,6 +353,41 @@ finally:
     for k in ("MERCHANT_TIER2_SHADOW_FILE", "MERCHANT_TIER2_REVIEW_FILE"):
         os.environ.pop(k, None)
 
+print("\n[7] shadow_health: band-independent accumulation summary")
+_now = time.time()
+_yday = _now - 86400
+_h_tmp = tempfile.mkdtemp(prefix="sr_health_")
+
+# Empty log -> all zeros.
+_h_ents = []
+_t2_write(_h_tmp, _h_ents, [])
+_h = semantic.shadow_health()
+check("health: empty log is all zeros",
+      _h["total"] == 0 and _h["today"] == 0 and _h["would_act"] == 0
+      and _h["would_not"] == 0 and _h["reviewed"] == 0 and _h["last_ts"] == 0,
+      repr(_h))
+
+# Mixed log: 2 entries today (1 would-act, 1 would-not) + 1 yesterday
+# (would-act), one labeled.
+_h_ents = [
+    _t2_entry("static_account", 72, 20, True, "funds for LAGOON WATERS", _now - 500),
+    _t2_entry("email", 30, 4, False, "email for SPAR", _now - 300),
+    _t2_entry("tid", 74, 22, True, "devices of MEDPLUS", _yday),
+]
+_h_shadow, _h_review = _t2_write(_h_tmp, _h_ents, [(0, True, "")])
+_h = semantic.shadow_health()
+check("health: totals counted across bands",
+      _h["total"] == 3 and _h["would_act"] == 2 and _h["would_not"] == 1,
+      repr(_h))
+check("health: today counts only today's entries",
+      _h["today"] == 2, repr(_h))
+check("health: reviewed reflects labels", _h["reviewed"] == 1, repr(_h))
+check("health: last_ts is the newest decision",
+      abs(_h["last_ts"] - (_now - 300)) < 1e-6, repr(_h))
+check("health: last_ts_human formatted",
+      bool(_h["last_ts_human"]) and "-" in _h["last_ts_human"],
+      repr(_h))
+
 print("\n============================================================")
 print(f"  RESULT: {_passed} passed, {_failed} failed")
 print("============================================================")

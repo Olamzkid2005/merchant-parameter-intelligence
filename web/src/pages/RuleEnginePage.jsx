@@ -125,6 +125,10 @@ export default function RuleEnginePage() {
   const [srBand, setSrBand] = useState('would_act')
   const [srLoading, setSrLoading] = useState(false)
   const [srMsg, setSrMsg] = useState(null)
+  // Shadow-log health (band-independent) — the "today's entry count" chip
+  // in the Engine tuning card, so accumulation is visible without opening
+  // the spot-check panel. Polled every 60s while this page is open.
+  const [health, setHealth] = useState(null)
 
   useEffect(() => {
     api
@@ -165,6 +169,21 @@ export default function RuleEnginePage() {
       .synonyms()
       .then(setSyn)
       .catch(() => { /* non-critical */ })
+  }, [])
+
+  // Shadow-log health: load once on mount, then poll every 60s so the chip
+  // tracks accumulation live while the page sits open.
+  useEffect(() => {
+    let alive = true
+    const tick = () => {
+      api
+        .shadowReview('all', 1)
+        .then((d) => { if (alive) setHealth(d.health || null) })
+        .catch(() => { /* non-critical */ })
+    }
+    tick()
+    const iv = setInterval(tick, 60000)
+    return () => { alive = false; clearInterval(iv) }
   }, [])
 
   async function saveSettingsKnobs() {
@@ -321,7 +340,9 @@ export default function RuleEnginePage() {
     setSrLoading(true)
     setSrMsg(null)
     try {
-      setSr(await api.shadowReview(srBand, 200))
+      const d = await api.shadowReview(srBand, 200)
+      setSr(d)
+      if (d.health) setHealth(d.health)
       setSrMsg({ kind: 'success', text: 'Shadow review refreshed.' })
     } catch (e) {
       setSrMsg({ kind: 'error', text: String(e.message || e) })
@@ -340,7 +361,9 @@ export default function RuleEnginePage() {
     setSrMsg(null)
     try {
       await api.shadowReviewLabel(entryId, correct, intent)
-      setSr(await api.shadowReview(srBand, 200))
+      const d = await api.shadowReview(srBand, 200)
+      setSr(d)
+      if (d.health) setHealth(d.health)
       setSrMsg({ kind: 'success', text: `Marked ${correct ? 'correct' : 'wrong'}.` })
     } catch (e) {
       setSrMsg({ kind: 'error', text: String(e.message || e) })
@@ -917,6 +940,18 @@ export default function RuleEnginePage() {
                         </span>
                         <span className="rounded-full bg-surface-container-high px-2.5 py-0.5 font-plex text-[10px] font-bold text-on-surface-variant">
                           source: {settings.settings.semantic_tier_mode.source}
+                        </span>
+                        <span
+                          title="Shadow-log health — watch it accumulate while the mode is shadow"
+                          className={`flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-plex text-[10px] font-bold ${
+                            (health?.today || 0) > 0
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-surface-container-high text-on-surface-variant'
+                          }`}
+                        >
+                          <span className={`h-1.5 w-1.5 rounded-full ${(health?.today || 0) > 0 ? 'animate-pulse bg-green-500' : 'bg-outline'}`} />
+                          shadow log: <b className="text-primary">{health?.today ?? 0}</b> today ·{' '}
+                          {health?.total ?? 0} total · {health?.reviewed ?? 0} reviewed
                         </span>
                       </div>
                     </div>

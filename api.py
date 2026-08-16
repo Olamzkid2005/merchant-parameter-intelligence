@@ -1159,6 +1159,9 @@ def shadow_review(band: str = "all", limit: int = 100):
     # Phase 3: per-intent fitted gates (the auto-run band's accept/override
     # evidence) so the panel can show learning progress in the same view.
     out["tier2_fit"] = calibration.fit_tier2()
+    # Shadow-log health (band-independent): lets the Rule Engine chip show
+    # today's entry count without opening this panel.
+    out["health"] = semantic.shadow_health()
     return out
 
 

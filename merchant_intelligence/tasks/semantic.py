@@ -766,3 +766,38 @@ def review_stats() -> Dict[str, Any]:
         "precision": round(total_correct / reviewed, 3) if reviewed else 0.0,
         "per_intent": per_intent,
     }
+
+
+def shadow_health() -> Dict[str, Any]:
+    """Band-independent shadow-log summary for the Rule Engine health chip.
+
+    Lets the user watch the log accumulate without opening the spot-check
+    panel: totals, today's entry count (local time), per-band counts,
+    labeled count, and the timestamp of the newest decision.
+    """
+    entries = read_shadow()
+    today = time.strftime("%Y-%m-%d")
+    today_n = 0
+    would_act = 0
+    last_ts = 0.0
+    for e in entries:
+        try:
+            ts = float(e.get("ts") or 0)
+        except (TypeError, ValueError):
+            ts = 0.0
+        if ts > last_ts:
+            last_ts = ts
+        if ts and time.strftime("%Y-%m-%d", time.localtime(ts)) == today:
+            today_n += 1
+        if e.get("tier2_would_act"):
+            would_act += 1
+    return {
+        "total": len(entries),
+        "today": today_n,
+        "would_act": would_act,
+        "would_not": len(entries) - would_act,
+        "reviewed": len(read_review()),
+        "last_ts": last_ts,
+        "last_ts_human": time.strftime("%Y-%m-%d %H:%M",
+                                        time.localtime(last_ts)) if last_ts else "",
+    }
