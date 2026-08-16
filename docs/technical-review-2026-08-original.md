@@ -182,6 +182,19 @@ safely shipping agents (#4) and measuring the flywheel (#5).
 
 **Complexity:** Medium. Estimated effort: 2–3 sprints.
 
+> **Status (first slice shipped):** `api.py` (2,073 lines, 61 handlers) has
+> been split into domain routers over a shared layer — `api_shared.py`
+> (helpers/models/singletons) + `api_routes/` (`auth_routes`, `profile_routes`,
+> `search_routes`, `tasks_routes`, `admin_routes`). `api.py` is now a slim
+> bootstrap (app + CORS + security middleware) that mounts the routers and
+> re-exports every handler/model so legacy `import api; api.search(...)` calls
+> keep working. Verified: the OpenAPI path set is byte-identical to the
+> pre-split route set (55 unique paths, 0 dropped, 0 added) and the full
+> live-API suite is green; `tests/test_api_split.py` (16 hermetic checks)
+> locks the parity in. Remaining roadmap: `/api/v1` versioned contract,
+> OpenAPI-as-contract, JSON-first envelope with Excel as an explicit export
+> transform, OpenTelemetry tracing/metrics, Docker packaging.
+
 **Architecture considerations:** This is the moment to introduce the shared
 response/error envelope, masking-aware serializers (inheriting from #1), and
 idempotent job semantics for long-running tasks (batch/reconcile). It

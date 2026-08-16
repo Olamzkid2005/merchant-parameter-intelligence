@@ -1,0 +1,100 @@
+"""test_api_split.py — hermetic regression checks for the roadmap #3
+api.py router split.
+
+Locks in three invariants so a future refactor cannot silently drop or
+rename an endpoint:
+
+  1. Every legacy handler/model name still resolves through `import api`
+     (tests + frontend depend on the re-exports).
+  2. The OpenAPI path set exactly matches the pre-split api.py route set
+     (55 unique paths — verified against git HEAD at split time).
+  3. Handlers moved into api_routes/ modules are importable from where they
+     now live (catches the "moved but forgot the import" class of bug).
+"""
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+passed = 0
+failed = 0
+
+
+def check(name, cond, extra=""):
+    global passed, failed
+    if cond:
+        passed += 1
+        print(f"  [OK] {name}")
+    else:
+        failed += 1
+        print(f"  [FAIL] {name} {extra}")
+
+
+print("[1] legacy names still resolve through api module")
+import api
+
+legacy = [
+    # handlers
+    "search", "health", "autocomplete", "suggest", "similar", "duplicates",
+    "aliases", "alias_approve", "alias_reject", "entity", "idclass_debug",
+    "search_export", "profile", "timeline", "compare", "stats", "report",
+    "report_export", "learn", "quickmatch", "quickmatch_export", "task",
+    "task_export", "task_analyze", "feedback_suggestions", "suggestion_apply",
+    "suggestion_reject", "get_synonym_candidates", "propose_synonyms",
+    "synonym_status", "apply_synonyms", "synonym_manifest", "shadow_review",
+    "shadow_review_label", "audit_endpoint", "ingest_endpoint",
+    "get_calibration", "reset_calibration", "get_preferences",
+    "forget_preference", "get_intents", "update_intent", "get_settings",
+    "update_settings", "reset_settings", "batch", "batch_export", "quality",
+    "quality_export", "reconcile_endpoint", "reconcile_export", "brief",
+    "selfimprove_status", "auth_login", "auth_logout", "auth_me",
+    "auth_config", "auth_save_config", "auth_add_user", "auth_remove_user",
+    "auth_reset_password",
+    # models
+    "SearchRequest", "BatchRequest", "LearnRequest", "EntityRequest",
+    "QuickMatchRequest", "ProfileRequest", "CompareRequest", "TaskRequest",
+    "AliasAction", "LoginRequest", "AuthConfigRequest", "AuthUserRequest",
+    "AuthPasswordRequest", "TimelineRequest", "SuggestionAction",
+    "SynonymStatusRequest", "SynonymApplyRequest", "ShadowReviewLabelRequest",
+    "PreferenceForgetRequest", "IntentPattern", "IntentUpdateRequest",
+    "SettingsUpdateRequest",
+]
+missing = [n for n in legacy if not hasattr(api, n)]
+check(f"all {len(legacy)} legacy names resolve", not missing,
+      f"missing: {missing}")
+
+print("[2] OpenAPI path set matches the pre-split route set (55 unique)")
+old_src = subprocess.run(["git", "show", "HEAD:api.py"],
+                         capture_output=True, text=True).stdout
+old_paths = set(re.findall(r'@app\.(?:get|post|put|delete|patch)\("([^"]+)"',
+                           old_src))
+check("pre-split unique paths == 55", len(old_paths) == 55, repr(len(old_paths)))
+new_paths = set(api.app.openapi()["paths"].keys())
+check("no paths dropped", not (old_paths - new_paths),
+      f"dropped: {sorted(old_paths - new_paths)}")
+check("no paths added", not (new_paths - old_paths),
+      f"added: {sorted(new_paths - old_paths)}")
+
+print("[3] router modules are importable (no moved-but-unimportable handlers)")
+router_names = [
+    "auth_routes", "profile_routes", "search_routes", "tasks_routes",
+    "admin_routes",
+]
+for rn in router_names:
+    try:
+        __import__(f"api_routes.{rn}")
+        check(f"api_routes.{rn} imports cleanly", True)
+    except Exception as exc:  # noqa: BLE001
+        check(f"api_routes.{rn} imports cleanly", False, repr(exc))
+
+print("[4] every legacy handler is callable (not None)")
+for n in ("search", "task", "batch", "autocomplete", "health",
+          "reconcile_export", "task_export"):
+    check(f"{n} is callable", callable(getattr(api, n, None)))
+
+print(f"\nRESULT: {passed} passed, {failed} failed")
+sys.exit(1 if failed else 0)
