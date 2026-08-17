@@ -154,20 +154,33 @@ def _resolve_address_rows(conn, name: str,
 _STATIC_SOURCE_MARK = "static_account_terminal"
 
 
-def _best_static_rows(tid: str, statics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _best_static_rows(tid: str, statics: List[Dict[str, Any]],
+                      prefer_qtb_fallback: bool = False) -> List[Dict[str, Any]]:
     """Static-account rows that actually belong to this TID.
 
     Preference: the TID's own rows from the static-account-manager source
     sheets first, then the TID's own rows from any sheet, then the legacy
     MX-level rows (terminals with no static row of their own). Keeps one row
     per terminal instead of one row per MX-shared static row.
+
+    prefer_qtb_fallback: NAME-based requests use True — when the rec has no
+    static row of its own, any QTB-source row for the merchant's MX beats
+    the parameter-file rows (the QTB sheet IS the static-account-manager
+    source). TID-based requests keep the plain fallback so a terminal whose
+    own parameter row carries its static account (e.g. 2ISW1816) never
+    borrows another terminal's QTB row.
     """
     tid_n = _norm(tid)
     own = [s for s in statics if tid_n and _norm(s.get("tid")) == tid_n]
-    if not own:
-        return statics
-    qtb = [s for s in own if _STATIC_SOURCE_MARK in (s.get("sheet_name") or "").lower()]
-    return qtb or own
+    if own:
+        qtb = [s for s in own if _STATIC_SOURCE_MARK in (s.get("sheet_name") or "").lower()]
+        return qtb or own
+    if prefer_qtb_fallback:
+        qtb = [s for s in statics
+               if _STATIC_SOURCE_MARK in (s.get("sheet_name") or "").lower()]
+        if qtb:
+            return qtb
+    return statics
 
 
 def _pipeline_static_account(conn, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -274,21 +287,38 @@ def _pipeline_static_account(conn, task: Dict[str, Any]) -> Dict[str, Any]:
         if not name_rows:
             not_found.append({"id": n, "kind": "name", "reason": "name not in registry"})
             continue
-        any_mx = False
+        emitted_any = False
         for rec in name_rows:
             mx = _norm(rec.get("mxcode"))
-            if not mx:
-                continue
-            any_mx = True
-            statics = _best_static_rows(rec.get("tid"),
-                                        static_map.get(mx) or statics_for(mx))
-            if statics:
-                for st in statics:
-                    emit("", rec.get("mxcode") or "", rec.get("merchant_name") or "", st, n)
-            else:
-                emit("", rec.get("mxcode") or "", rec.get("merchant_name") or "", {}, n)
-        if not any_mx:
-            not_found.append({"id": n, "kind": "name", "reason": "no MX code on resolved rows"})
+            tid = _norm(rec.get("tid"))
+            statics: List[Dict[str, Any]] = []
+            if mx:
+                # Prefer the rec's own QTB row, then any QTB row for its MX,
+                # then the MX-level rows (QTB-first for name requests).
+                statics = _best_static_rows(
+                    tid, static_map.get(mx) or statics_for(mx),
+                    prefer_qtb_fallback=True)
+            if not statics and tid:
+                # Recs without an MX code (the standalone Medplus workbook
+                # rows carry no mxcode) — the terminal's own QTB row is
+                # keyed by TID.
+                statics = list(static_rows_for_tid(conn, [tid]).values())
+            if not statics and mx:
+                statics = static_map.get(mx) or statics_for(mx)
+            for st in statics:
+                emitted_any = True
+                emit(tid or st.get("tid") or "",
+                     rec.get("mxcode") or st.get("mxcode") or "",
+                     st.get("merchant_name") or rec.get("merchant_name") or "",
+                     st, n)
+        if not emitted_any:
+            # Merchant exists but has no static-account row — show it with a
+            # clear status instead of a bare not-found.
+            first = next((r for r in name_rows
+                          if _norm(r.get("mxcode")) or _norm(r.get("tid"))),
+                         name_rows[0])
+            emit(first.get("tid") or "", first.get("mxcode") or "",
+                 first.get("merchant_name") or "", {}, n)
 
     resolved_kinds = []
     if tids:

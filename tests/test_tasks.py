@@ -291,6 +291,35 @@ check("alias phrasing: QTB alias via static_account path",
       _nat_by_id.get("2ISWA842", {}).get("alias") == "022962"
       and _nat_by_id.get("2ISWK935", {}).get("alias") == "022963",
       repr([(r.get("identifier"), r.get("alias")) for r in _nat["rows"]]))
+# ── Name-based static requests prefer the QTB source ─────────────────────
+# 'get the static account for LAGOON WATERS' must return the merchant's
+# QTB static account (5180851086), not a parameter-file first row.
+_ns1 = execute_task(detect_task("get the static account for LAGOON WATERS",
+                                use_llm=False))
+_ns1_by_id = {str(r.get("identifier")).upper(): r for r in _ns1["rows"]}
+check("name static: LAGOON QTB static account",
+      _ns1_by_id.get("LAGOON WATERS", {}).get("static_acc_no") == "5180851086",
+      repr(_ns1_by_id.get("LAGOON WATERS", {}).get("static_acc_no")))
+check("name static: LAGOON QTB payable/alias/bank present",
+      bool(_ns1_by_id.get("LAGOON WATERS", {}).get("payable_code"))
+      and bool(_ns1_by_id.get("LAGOON WATERS", {}).get("alias"))
+      and bool(_ns1_by_id.get("LAGOON WATERS", {}).get("bank")),
+      repr((_ns1_by_id.get("LAGOON WATERS", {}).get("payable_code"),
+            _ns1_by_id.get("LAGOON WATERS", {}).get("alias"),
+            _ns1_by_id.get("LAGOON WATERS", {}).get("bank"))))
+# MEDPLUS name rows carry NO mxcode (standalone workbook) — the terminal's
+# own QTB row (keyed by TID) must supply the static data, not a blank row.
+_ns2 = execute_task(detect_task("get the static account for MEDPLUS",
+                                use_llm=False))
+_ns2_first = next((r for r in _ns2["rows"]
+                   if str(r.get("identifier")).upper() == "MEDPLUS"), {})
+check("name static: MEDPLUS row gets QTB static account (not blank)",
+      bool(_ns2_first.get("static_acc_no"))
+      and str(_ns2_first.get("static_acc_no")).startswith("5180"),
+      repr(_ns2_first.get("static_acc_no")))
+check("name static: MEDPLUS QTB beneficiary is Medplus Limited",
+      str(_ns2_first.get("beneficiary")).upper() == "MEDPLUS LIMITED",
+      repr(_ns2_first.get("beneficiary")))
 check("single bare MX is NOT a task",
       detect_task("MX183544") is None)
 check("single MX + instruction IS a task",
