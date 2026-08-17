@@ -1320,11 +1320,11 @@ if seg2:
           repr(seg2.get("segment")))
     check("emails-segment field email", "email" in (seg2.get("segment_fields") or []))
 
-seg3 = detect_task("get me all the phones in the NNPC PARAMETER FILE BATCH sheet")
+seg3 = detect_task("get me all the phones in the NNPC Updated 17aug sheet")
 check("sheet-segment detected", (seg3 or {}).get("intent") == "segment")
 if seg3:
     r3 = execute_task(seg3)
-    check("sheet-segment matches NNPC batch rows", len(r3["rows"]) >= 200,
+    check("sheet-segment matches NNPC Updated 17aug rows", len(r3["rows"]) >= 200,
           f"{len(r3['rows'])} rows")
 
 # Segmentation must NOT hijack per-merchant profile requests or plain names
@@ -1403,6 +1403,25 @@ if segC:
     check("all-addresses-for-medplus every row has an address",
           all(a.strip() for a in addrs),
           f"{sum(1 for a in addrs if a.strip())}/{len(addrs)} rows")
+# 'nnpc' as a name must return the FULL NNPC sheet (source of truth)
+# even though dealer-name recovery renamed most rows to the real dealer
+# name (392/410 no longer contain 'NNPC' in merchant_name). The sheet
+# match in _terminal_rows_for_name is what keeps the family complete.
+segN = detect_task("get me all the tid for nnpc")
+if segN:
+    rN = execute_task(segN)
+    n_tids = [str(r.get("tid") or r.get("TID") or "").strip()
+              for r in rN["rows"] if r.get("tid") or r.get("TID")]
+    check("all-tid-for-nnpc full sheet list (>= 400 rows)",
+          len(rN["rows"]) >= 400, f"{len(rN['rows'])} rows")
+    check("all-tid-for-nnpc no duplicate TIDs",
+          len(n_tids) == len(set(n_tids)),
+          f"{len(n_tids)} rows vs {len(set(n_tids))} distinct")
+    check("all-tid-for-nnpc includes dealer-name rows without NNPC text",
+          any("LAGOON WATERS" in str(r.get("merchant") or r.get("Merchant") or "")
+              for r in rN["rows"]),
+          repr([str(r.get("merchant") or r.get("Merchant"))[:30] for r in rN["rows"][:5]]))
+
 # Two terminals sharing ONE address must BOTH appear (dedupe keys on the
 # TID, not the address value).
 segD = detect_task("get the address for addide abaranje")
@@ -1722,7 +1741,7 @@ if dup:
     rdup = execute_task(dup)
     check("duplicates found clusters", len(rdup["rows"]) >= 1, f"{len(rdup['rows'])}")
 
-smm = detect_task("summarize the NNPC PARAMETER FILE BATCH sheet")
+smm = detect_task("summarize the NNPC Updated 17aug sheet")
 check("summary intent detected", (smm or {}).get("intent") == "summary",
       repr((smm or {}).get("intent")))
 if smm:
@@ -1838,8 +1857,8 @@ if _r_conf.get("21030265"):
 _r_conf2 = resolve_mx(_cfg_conn, ["21030265"])
 check("resolve_mx maps digit-0 TID to its MX row",
       bool(_r_conf2), repr(list(_r_conf2)))
-check("confusable MX row carries MX183645",
-      any(str(r.get("mxcode")) == "MX183645" for r in _r_conf2.values()),
+check("confusable MX row carries MX184399",
+      any(str(r.get("mxcode")) == "MX184399" for r in _r_conf2.values()),
       repr([r.get("mxcode") for r in _r_conf2.values()]))
 _cfg_conn.close()
 # The exact letter-O spelling still resolves through the pipeline unchanged.

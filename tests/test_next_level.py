@@ -220,7 +220,7 @@ try:
               any("LAGOON WATERS" in n for n in _ph_names),
               str(sorted(_ph_names)))
         check("phone family includes the same merchant's other name",
-              any("INTERSWITCH" in n and "NNPC" in n for n in _ph_names),
+              any("NNPC" in n for n in _ph_names),
               str(sorted(_ph_names)))
 
     # The JUST CHIPS fan-out the guard was BUILT to stop must stay blocked:

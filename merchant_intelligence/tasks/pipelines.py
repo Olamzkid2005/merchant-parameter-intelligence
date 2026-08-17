@@ -353,15 +353,22 @@ def _terminal_rows_for_name(conn, name: str, limit: int = 2000) -> List[Dict[str
     code win so the list carries each terminal's MX. Returns [] when
     nothing matches so the caller can fall back to the fuzzy search
     resolver (which handles typos).
+
+    The source SHEET is also matched: after dealer-name recovery most
+    NNPC-sheet rows no longer contain 'NNPC' in the merchant name (they
+    carry the real dealer name), so 'get me all the tids for nnpc' must
+    still return every terminal in the 'NNPC Updated 17aug' sheet — the
+    sheet itself is the source of truth for that family.
     """
     like = f"%{_norm(name)}%"
     rows = _fetch(
         conn,
         "SELECT id, tid, mxcode, merchant_name, sheet_name, address "
-        "FROM merchants WHERE UPPER(TRIM(merchant_name)) LIKE ? "
+        "FROM merchants WHERE (UPPER(TRIM(merchant_name)) LIKE ? "
+        "OR UPPER(sheet_name) LIKE ?) "
         "AND TRIM(COALESCE(tid, '')) <> '' "
         "ORDER BY (CASE WHEN TRIM(COALESCE(mxcode, '')) <> '' THEN 0 ELSE 1 END), id",
-        [like],
+        [like, like],
     )
     out: List[Dict[str, Any]] = []
     seen: set = set()
