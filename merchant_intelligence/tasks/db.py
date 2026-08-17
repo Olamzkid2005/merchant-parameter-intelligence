@@ -173,6 +173,36 @@ def static_accounts_for_mx(conn, mxcodes: List[str]) -> Dict[str, List[Dict[str,
     return out
 
 
+def static_rows_for_tid(conn, tids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """First static-account-manager (QTB) terminal row per TID.
+
+    The QTB source sheets ('static_account_terminal...') carry the per-
+    terminal payable/alias/static account the business relies on. Field
+    pipelines that resolve a TID to one registry row must prefer this row
+    so alias/payable values come from the terminal's own QTB entry — the
+    parameter file's first-row values are a different set (MEDPLUS:
+    QTB alias 022962 vs parameter-file alias 006793 for the same TID).
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    if not tids:
+        return out
+    expanded = _expand_confusables(tids)
+    q = ",".join("?" for _ in expanded)
+    rows = _fetch(
+        conn,
+        f"SELECT tid, mxcode, merchant_name, payable_code, alias, static_acc_no, "
+        f"account_name, sheet_name FROM merchants "
+        f"WHERE UPPER(TRIM(tid)) IN ({q}) "
+        f"AND LOWER(COALESCE(sheet_name, '')) LIKE '%static_account_terminal%'",
+        [i.upper().strip() for i in expanded],
+    )
+    for r in rows:
+        key = _norm(r["tid"])
+        if key and key not in out:
+            out[key] = r
+    return out
+
+
 def _name_status(user_name: str, registry_name: str) -> str:
     """Compare the user-provided pasted name with the registry name.
 

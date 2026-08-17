@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Tuple
 from .db import (
     RESOLVE_COLS, _fetch, _name_for, _name_status, _norm, resolve_any,
     resolve_mx, static_accounts_for_acc, static_accounts_for_mx,
+    static_rows_for_tid,
 )
 from .parser import key_merchant_matches, looks_like_address
 from .vocab import (
@@ -319,11 +320,23 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
     resolved = resolve_any(conn, values)
     named = task.get("named", [])
     rows, not_found = [], []
+    # Alias/payable for TID inputs: prefer the terminal's OWN static-account-
+    # manager (QTB) row value. resolve_any returns the first registry row
+    # (the parameter file), whose alias/payable is a different value set
+    # (MEDPLUS: QTB alias 022962 vs parameter alias 006793 for 2ISWA842) —
+    # the same per-TID rule the static_account pipeline uses.
+    tid_qb: Dict[str, Dict[str, Any]] = {}
+    if field in ("alias", "payable_code") and idents.get("tid"):
+        tid_qb = static_rows_for_tid(conn, idents["tid"])
     for v in values:
         r = resolved.get(v.upper().strip())
         if not r:
             not_found.append({"id": v, "kind": "any", "reason": "not in registry"})
             continue
+        qr = tid_qb.get(v.upper().strip()) if tid_qb else None
+        if qr and qr.get(field):
+            r = dict(r)
+            r[field] = qr[field]
         status = _name_status(_name_for(named, v), r.get("merchant_name") or "")
         rows.append({
             "identifier": v,

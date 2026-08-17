@@ -257,6 +257,40 @@ check("confusable: exact TID wins (2ISWZ321 not 2ISW2321)",
 check("confusable: exact TID keeps its own QTB row",
       any(str(r.get("payable_code")) == "8907390" for r in _z["rows"]),
       repr([r.get("payable_code") for r in _z["rows"]]))
+# ── Alias/payable field pipelines also prefer the terminal's own QTB row ──
+# The alias/payable INTENTS resolve via resolve_any (first registry row =
+# the parameter file), so they must upgrade to the TID's own static-account-
+# manager row the same way the static_account pipeline does (MEDPLUS:
+# QTB alias 022962 vs parameter alias 006793 for 2ISWA842).
+_a = execute_task(detect_task("get me the aliases for "
+                               "2ISWA842 2ISWK935 2ISW2571",
+                               use_llm=False, intent_override="alias"))
+_a_by_id = {str(r.get("identifier")).upper(): r for r in _a["rows"]}
+check("alias intent: QTB alias per terminal",
+      _a_by_id.get("2ISWA842", {}).get("Alias") == "022962"
+      and _a_by_id.get("2ISWK935", {}).get("Alias") == "022963"
+      and _a_by_id.get("2ISW2571", {}).get("Alias") == "022964",
+      repr([(r.get("identifier"), r.get("Alias")) for r in _a["rows"]]))
+_p = execute_task(detect_task("get me the payable for "
+                               "2ISWA842 2ISWK935 2ISW2571",
+                               use_llm=False, intent_override="payable"))
+_p_by_id = {str(r.get("identifier")).upper(): r for r in _p["rows"]}
+check("payable intent: QTB payable per terminal",
+      _p_by_id.get("2ISWA842", {}).get("Payable Code") == "1156555"
+      and _p_by_id.get("2ISWK935", {}).get("Payable Code") == "1019218"
+      and _p_by_id.get("2ISW2571", {}).get("Payable Code") == "9306953",
+      repr([(r.get("identifier"), r.get("Payable Code")) for r in _p["rows"]]))
+# Natural phrasing routes to static_account, which already returns the same
+# per-TID QTB alias/payable values (so the task export's Alias column is
+# correct without an override).
+_nat = execute_task(detect_task("get me all the alias for these TIDs\n"
+                                "2ISWA842 2ISWK935 2ISW2571",
+                                use_llm=False))
+_nat_by_id = {str(r.get("identifier")).upper(): r for r in _nat["rows"]}
+check("alias phrasing: QTB alias via static_account path",
+      _nat_by_id.get("2ISWA842", {}).get("alias") == "022962"
+      and _nat_by_id.get("2ISWK935", {}).get("alias") == "022963",
+      repr([(r.get("identifier"), r.get("alias")) for r in _nat["rows"]]))
 check("single bare MX is NOT a task",
       detect_task("MX183544") is None)
 check("single MX + instruction IS a task",
