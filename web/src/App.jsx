@@ -46,6 +46,16 @@ export default function App() {
     api.authMe().then(setAuth).catch(() => setAuth({ enabled: false, authenticated: false }))
   }, [])
 
+  // NOTE: every hook must stay ABOVE the conditional returns below — the
+  // auth gate returns early (Loading… / LoginPage), and a hook after those
+  // returns would fire only on some renders, crashing the whole tree
+  // ("Rendered more hooks than during the previous render" -> white screen).
+  useEffect(() => {
+    const onPop = () => setPage(currentPage())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
   async function handleLogout() {
     try {
       await api.authLogout()
@@ -74,12 +84,6 @@ export default function App() {
     })
     window.history.pushState({}, '', url)
   }
-
-  useEffect(() => {
-    const onPop = () => setPage(currentPage())
-    window.addEventListener('popstate', onPop)
-    return () => window.removeEventListener('popstate', onPop)
-  }, [])
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

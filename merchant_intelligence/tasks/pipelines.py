@@ -141,6 +141,34 @@ def _resolve_address_rows(conn, name: str,
     return out
 
 
+# The static-account-manager source sheets (QTB terminal file). These carry
+# the per-terminal payable/alias/static account the business relies on
+# ("terminal code | qtb merchant code | Payable Code | qtb merchant alias |
+# Static Account Number | ..."). All of a merchant's terminals share one MX
+# code (MEDPLUS has 1000+ terminals under MX3490), so resolving by MX alone
+# returns hundreds of rows per terminal and the table merge collapses them
+# to whatever row the DB returns first — the WRONG payable/alias/static
+# account for most terminals. The per-TID pick below prefers the TID's OWN
+# static-account-manager row.
+_STATIC_SOURCE_MARK = "static_account_terminal"
+
+
+def _best_static_rows(tid: str, statics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Static-account rows that actually belong to this TID.
+
+    Preference: the TID's own rows from the static-account-manager source
+    sheets first, then the TID's own rows from any sheet, then the legacy
+    MX-level rows (terminals with no static row of their own). Keeps one row
+    per terminal instead of one row per MX-shared static row.
+    """
+    tid_n = _norm(tid)
+    own = [s for s in statics if tid_n and _norm(s.get("tid")) == tid_n]
+    if not own:
+        return statics
+    qtb = [s for s in own if _STATIC_SOURCE_MARK in (s.get("sheet_name") or "").lower()]
+    return qtb or own
+
+
 def _pipeline_static_account(conn, task: Dict[str, Any]) -> Dict[str, Any]:
     """TIDs/MX codes -> static account + beneficiary table (with name checks)."""
     idents = task["identifiers"]
@@ -206,7 +234,7 @@ def _pipeline_static_account(conn, task: Dict[str, Any]) -> Dict[str, Any]:
             not_found.append({"id": tid, "kind": "tid", "reason": "TID not in registry"})
             continue
         mx = _norm(row["mxcode"])
-        statics = static_map.get(mx, [])
+        statics = _best_static_rows(tid, static_map.get(mx, []))
         if not statics:
             emit(tid, row["mxcode"], row["merchant_name"], {}, tid)
             continue
@@ -251,7 +279,8 @@ def _pipeline_static_account(conn, task: Dict[str, Any]) -> Dict[str, Any]:
             if not mx:
                 continue
             any_mx = True
-            statics = static_map.get(mx) or statics_for(mx)
+            statics = _best_static_rows(rec.get("tid"),
+                                        static_map.get(mx) or statics_for(mx))
             if statics:
                 for st in statics:
                     emit("", rec.get("mxcode") or "", rec.get("merchant_name") or "", st, n)

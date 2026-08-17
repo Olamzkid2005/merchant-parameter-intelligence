@@ -219,6 +219,44 @@ check("task intent is static_account",
       (detect_task(text) or {}).get("intent") == "static_account")
 check("plain name is NOT a task",
       detect_task("LAGOON WATERS") is None)
+
+# ── Per-TID static rows (MEDPLUS shares MX3490 across 1000+ terminals) ───
+# The static pipeline must return each TID's OWN static-account-manager row
+# (QTB source sheet), not the first MX-level row the merge collapses to.
+_sa = execute_task(detect_task("get me the payable for "
+                               "2ISWA842 2ISWK935 2ISW2571",
+                               use_llm=False))
+_sa_by_id = {str(r.get("identifier")).upper(): r for r in _sa["rows"]}
+check("per-TID static: 2ISWA842 QTB payable",
+      _sa_by_id.get("2ISWA842", {}).get("payable_code") == "1156555",
+      repr(_sa_by_id.get("2ISWA842", {}).get("payable_code")))
+check("per-TID static: 2ISWA842 alias + static acc",
+      _sa_by_id.get("2ISWA842", {}).get("alias") == "022962"
+      and _sa_by_id.get("2ISWA842", {}).get("static_acc_no") == "5180005449",
+      repr((_sa_by_id.get("2ISWA842", {}).get("alias"),
+            _sa_by_id.get("2ISWA842", {}).get("static_acc_no"))))
+check("per-TID static: 2ISWK935 QTB payable",
+      _sa_by_id.get("2ISWK935", {}).get("payable_code") == "1019218",
+      repr(_sa_by_id.get("2ISWK935", {}).get("payable_code")))
+check("per-TID static: 2ISW2571 QTB payable",
+      _sa_by_id.get("2ISW2571", {}).get("payable_code") == "9306953",
+      repr(_sa_by_id.get("2ISW2571", {}).get("payable_code")))
+# Distinct QTB values per terminal, never one shared row for the whole MX.
+check("per-TID static: no MX-collapse (3 distinct payables)",
+      len({r.get("payable_code") for r in _sa["rows"]}) == 3,
+      repr([r.get("payable_code") for r in _sa["rows"]]))
+# Confusable look-alikes (Z↔2) must never steal an EXACT TID match:
+# 2ISWZ321 and 2ISW2321 are both real registry TIDs.
+_z = execute_task(detect_task("get me the payable for 2ISWZ321",
+                               use_llm=False))
+check("confusable: exact TID wins (2ISWZ321 not 2ISW2321)",
+      any(str(r.get("tid")).upper() == "2ISWZ321" for r in _z["rows"])
+      and not any(str(r.get("tid")).upper() == "2ISW2321"
+                  for r in _z["rows"]),
+      repr([(r.get("tid"), r.get("payable_code")) for r in _z["rows"]]))
+check("confusable: exact TID keeps its own QTB row",
+      any(str(r.get("payable_code")) == "8907390" for r in _z["rows"]),
+      repr([r.get("payable_code") for r in _z["rows"]]))
 check("single bare MX is NOT a task",
       detect_task("MX183544") is None)
 check("single MX + instruction IS a task",

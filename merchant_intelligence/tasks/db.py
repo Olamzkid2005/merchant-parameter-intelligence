@@ -93,6 +93,11 @@ def resolve_any(conn, values: List[str]) -> Dict[str, Dict[str, Any]]:
         f"FROM merchants WHERE {where}",
         expanded * len(RESOLVE_COLS),
     )
+    # Pass 1: EXACT matches only. A value that exists verbatim in the
+    # registry must never resolve to a look-alike row — 2ISWZ321 and
+    # 2ISW2321 are BOTH real TIDs, so confusables (0↔O, 1↔I, Z↔2, …) are a
+    # fallback for OCR-style typos, not a licence to pick a different real
+    # merchant.
     for r in rows:
         for field in RESOLVE_COLS:
             key = _norm(r[field])
@@ -102,7 +107,20 @@ def resolve_any(conn, values: List[str]) -> Dict[str, Dict[str, Any]]:
                 vu = v.upper().strip()
                 if vu in out:
                     continue
-                if key == vu or confusable_key(key) == confusable_key(vu):
+                if key == vu:
+                    out[vu] = r
+    # Pass 2: confusable matches only for values with no exact row
+    # ('21030265' -> the '2103O265' row when the registry stores letters).
+    for r in rows:
+        for field in RESOLVE_COLS:
+            key = _norm(r[field])
+            if not key:
+                continue
+            for v in values:
+                vu = v.upper().strip()
+                if vu in out:
+                    continue
+                if confusable_key(key) == confusable_key(vu):
                     out[vu] = r
     return out
 
