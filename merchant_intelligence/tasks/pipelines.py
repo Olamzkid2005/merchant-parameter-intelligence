@@ -343,15 +343,16 @@ def _pipeline_static_account(conn, task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _tid_rows_for_name(conn, name: str, limit: int = 2000) -> List[Dict[str, Any]]:
+def _terminal_rows_for_name(conn, name: str, limit: int = 2000) -> List[Dict[str, Any]]:
     """Every registry row whose merchant name contains `name`, one per TID.
 
-    'get me all the tids for MEDPLUS' must return the merchant's FULL
-    terminal list (198 distinct TIDs for MEDPLUS), not the top-8 search
-    rows — and each TID exactly once (the same terminal appears in several
-    sheets). Rows with an MX code win so the list carries each terminal's
-    MX. Returns [] when nothing matches so the caller can fall back to the
-    fuzzy search resolver (which handles typos).
+    'get me all the tids for MEDPLUS' / 'get me all the addresses for
+    MEDPLUS' must return the merchant's FULL terminal list (198 distinct
+    TIDs for MEDPLUS), not the top-8 search rows — and each TID exactly
+    once (the same terminal appears in several sheets). Rows with an MX
+    code win so the list carries each terminal's MX. Returns [] when
+    nothing matches so the caller can fall back to the fuzzy search
+    resolver (which handles typos).
     """
     like = f"%{_norm(name)}%"
     rows = _fetch(
@@ -416,6 +417,10 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
     # column instead — fuzzy name search has no merchant-name overlap for a
     # road + city string and returns unrelated stores.
     by_address = False
+    # Full-list mode (one row per terminal) is only set by the tid/address
+    # branches below; default False so address-paste requests never read an
+    # unbound name.
+    all_rows = False
     for n in task.get("names") or []:
         if task.get("names_are_addresses") and looks_like_address(n):
             name_rows = _resolve_address_rows(conn, n)
@@ -428,12 +433,13 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
                 # fuzzy tier. A genuinely missing address reports NOT FOUND.
                 name_rows = [r for r in _resolve_name_rows(n)
                              if (r.get("_score") or 0) >= 8.5]
-        elif intent == "tid":
-            # 'get me all the tids for MEDPLUS': the FULL distinct TID list
-            # the merchant owns, not the top search rows (and no duplicates
-            # from the same terminal appearing in several sheets).
+        elif intent in ("tid", "address"):
+            # 'get me all the tids/addresses for MEDPLUS': the FULL distinct
+            # terminal list the merchant owns, not the top search rows (and
+            # no duplicates from the same terminal appearing in several
+            # sheets). Each terminal contributes its own address.
             all_rows = True
-            name_rows = _tid_rows_for_name(conn, n) or _resolve_name_rows(n)
+            name_rows = _terminal_rows_for_name(conn, n) or _resolve_name_rows(n)
         else:
             all_rows = False
             name_rows = _resolve_name_rows(n)
@@ -447,9 +453,12 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
             continue
         seen_vals: set = set()
         for rec in name_rows:
-            # Dedupe by the requested field value so a value that appears in
-            # several sheets never repeats (the tid is the row identity).
-            val = str(rec.get(field) or "").strip().upper()
+            # Dedupe by row identity (the tid) for full terminal lists — a
+            # shared address (two terminals in one mall) must still show
+            # both rows. For ordinary field requests, dedupe by the field
+            # value so a value appearing in several sheets never repeats.
+            dedupe_key = "tid" if all_rows else field
+            val = str(rec.get(dedupe_key) or "").strip().upper()
             if val and val in seen_vals:
                 continue
             if val:

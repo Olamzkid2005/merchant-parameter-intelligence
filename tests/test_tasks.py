@@ -1383,6 +1383,48 @@ if segA:
           len(tids) == len(set(tids)),
           f"{len(tids)} rows vs {len(set(tids))} distinct")
 
+# The same full-list-per-terminal rule applies to the address intent:
+# 'get me all the addresses for medplus' returns one row per terminal with
+# its own address, not the top-8 search rows.
+segC = detect_task("get me all the addresses for medplus")
+check("all-addresses-for-medplus -> address intent",
+      segC is not None and segC.get("intent") == "address",
+      repr((segC or {}).get("intent")))
+if segC:
+    rC = execute_task(segC)
+    addrs = [r.get("address") or r.get("Address") or "" for r in rC["rows"]]
+    tidsC = [str(r.get("tid") or r.get("TID") or "").strip()
+             for r in rC["rows"] if r.get("tid") or r.get("TID")]
+    check("all-addresses-for-medplus full terminal list (>= 100 rows)",
+          len(rC["rows"]) >= 100, f"{len(rC['rows'])} rows")
+    check("all-addresses-for-medplus no duplicate TIDs",
+          len(tidsC) == len(set(tidsC)),
+          f"{len(tidsC)} rows vs {len(set(tidsC))} distinct")
+    check("all-addresses-for-medplus every row has an address",
+          all(a.strip() for a in addrs),
+          f"{sum(1 for a in addrs if a.strip())}/{len(addrs)} rows")
+# Two terminals sharing ONE address must BOTH appear (dedupe keys on the
+# TID, not the address value).
+segD = detect_task("get the address for addide abaranje")
+if segD:
+    rD = execute_task(segD)
+    d_tids = {str(r.get("tid") or r.get("TID") or "").strip()
+              for r in rD["rows"] if r.get("tid") or r.get("TID")}
+    check("shared-address terminals both shown (2ISW971B + 2ISW417C)",
+          {"2ISW971B", "2ISW417C"} <= d_tids, repr(sorted(d_tids)))
+# The address-PASTE path is untouched: pasted address strings still match
+# the address column with address_match status, never the full-list branch.
+segE = detect_task("get me the tids for BRITISH INTERNATIONAL SCHOOL ROAD, LEKKI, LAGOS")
+check("address paste still names_are_addresses",
+      segE is not None and segE.get("names_are_addresses") is True,
+      repr(segE and segE.get("names_are_addresses")))
+if segE:
+    rE = execute_task(segE)
+    check("address paste resolves by address column",
+          bool(rE["rows"]) and all(r.get("status") == "address_match"
+                                   for r in rE["rows"]),
+          repr([r.get("status") for r in (rE.get("rows") or [])[:3]]))
+
 # ── Field-request noise stripping (regression: "get me the TID for X")
 print("\n[4c2] field-request noise stripping")
 from merchant_intelligence.matcher import strip_query_noise
