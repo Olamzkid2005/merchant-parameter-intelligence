@@ -343,6 +343,38 @@ def _pipeline_static_account(conn, task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _tid_rows_for_name(conn, name: str, limit: int = 2000) -> List[Dict[str, Any]]:
+    """Every registry row whose merchant name contains `name`, one per TID.
+
+    'get me all the tids for MEDPLUS' must return the merchant's FULL
+    terminal list (198 distinct TIDs for MEDPLUS), not the top-8 search
+    rows — and each TID exactly once (the same terminal appears in several
+    sheets). Rows with an MX code win so the list carries each terminal's
+    MX. Returns [] when nothing matches so the caller can fall back to the
+    fuzzy search resolver (which handles typos).
+    """
+    like = f"%{_norm(name)}%"
+    rows = _fetch(
+        conn,
+        "SELECT id, tid, mxcode, merchant_name, sheet_name, address "
+        "FROM merchants WHERE UPPER(TRIM(merchant_name)) LIKE ? "
+        "AND TRIM(COALESCE(tid, '')) <> '' "
+        "ORDER BY (CASE WHEN TRIM(COALESCE(mxcode, '')) <> '' THEN 0 ELSE 1 END), id",
+        [like],
+    )
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for r in rows:
+        tid = _norm(r.get("tid"))
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        out.append(dict(r))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _pipeline_field(conn, task, field: str, label: str, intent: str):
     """Generic pipeline: identifiers -> one registry field (email/phone/mx)."""
     idents = task["identifiers"]
@@ -396,7 +428,14 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
                 # fuzzy tier. A genuinely missing address reports NOT FOUND.
                 name_rows = [r for r in _resolve_name_rows(n)
                              if (r.get("_score") or 0) >= 8.5]
+        elif intent == "tid":
+            # 'get me all the tids for MEDPLUS': the FULL distinct TID list
+            # the merchant owns, not the top search rows (and no duplicates
+            # from the same terminal appearing in several sheets).
+            all_rows = True
+            name_rows = _tid_rows_for_name(conn, n) or _resolve_name_rows(n)
         else:
+            all_rows = False
             name_rows = _resolve_name_rows(n)
         if not name_rows:
             not_found.append({
@@ -406,9 +445,25 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
                             else "name not in registry"),
             })
             continue
+        seen_vals: set = set()
         for rec in name_rows:
-            status = ("address_match" if by_address
-                      else _name_status(n, rec.get("merchant_name") or ""))
+            # Dedupe by the requested field value so a value that appears in
+            # several sheets never repeats (the tid is the row identity).
+            val = str(rec.get(field) or "").strip().upper()
+            if val and val in seen_vals:
+                continue
+            if val:
+                seen_vals.add(val)
+            if by_address:
+                status = "address_match"
+            elif all_rows:
+                # Every row came from a merchant-name match ('all the tids
+                # for medplus') — branch names legitimately differ from the
+                # requested root, so the strict token-sort check would flag
+                # valid rows as name_mismatch. 'found' is honest here.
+                status = "found"
+            else:
+                status = _name_status(n, rec.get("merchant_name") or "")
             rows.append({
                 "identifier": n,
                 "merchant": rec.get("merchant_name") or "",

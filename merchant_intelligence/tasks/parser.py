@@ -134,6 +134,19 @@ def _match_key_merchant(name: str) -> bool:
     return bool(key_merchant_matches(name))
 
 
+# Nouns that make a phrase a COLLECTION target ('all the emails of all nnpc
+# merchants') rather than a field request for ONE merchant ('all the tid for
+# medplus'). 'of all' counts too ('addresses of all nnpc').
+SEGMENT_COLLECTIVE_NOUNS = frozenset({
+    "stations", "station", "stores", "store", "outlets", "outlet",
+    "merchants", "merchant", "branches", "branch", "sheets", "sheet",
+    "locations", "location", "depots", "malls",
+    # A workbook/parameter FILE or BATCH is also a collection target:
+    # 'every address in the NNPC file' / 'all tids from the batch sheet'.
+    "files", "file", "batches", "batch", "workbooks", "workbook",
+})
+
+
 def _looks_like_segment(text: str) -> bool:
     """Collection request detection: collective marker + field word.
 
@@ -143,9 +156,20 @@ def _looks_like_segment(text: str) -> bool:
     'all' also qualifies when a KEY merchant root is named ('all addide
     stores in lagos') — the root makes the collection intent unambiguous,
     while 'ALL STAR STORES' has no such root.
+
+    The phrase must ALSO target a COLLECTION, not a single merchant: 'get me
+    all the tid for medplus' is a field request for one merchant (the TIDs
+    MEDPLUS owns), not a 1000-row segment dump — it needs a group noun
+    ('stations', 'stores', 'merchants', 'sheet', …) or the 'of all' pattern
+    ('addresses of all nnpc') to be a collection.
     """
     low = re.sub(r"\s+", " ", _normalize(text))
     if not _has_field_word(low):
+        return False
+    collective = (bool(_whole_word_re("of all").search(low))
+                  or any(_whole_word_re(w).search(low)
+                         for w in SEGMENT_COLLECTIVE_NOUNS))
+    if not collective:
         return False
     strong = any(_whole_word_re(m).search(low)
                  for m in ("all the", "list of", "list all", "every", "each", "all of"))

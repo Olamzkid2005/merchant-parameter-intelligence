@@ -1350,6 +1350,39 @@ check("extract_segment strips field words",
       == ("NNPC", ["address"]),
       repr(extract_segment("get me all the addresses of all nnpc stations")))
 
+# 'all the <field> for <merchant>' is a FIELD request for one merchant, not
+# a 1000-row segment dump: the segment gate needs a collective noun
+# (stations/stores/merchants/…) or the 'of all' pattern to fire.
+segA = detect_task("get me all the tid for medplus")
+check("all-tid-for-medplus -> tid NOT segment",
+      segA is not None and segA.get("intent") == "tid"
+      and segA.get("names") == ["MEDPLUS"],
+      repr((segA or {}).get("intent")))
+segB = detect_task("give me all the tid for addide")
+check("all-tid-for-addide -> tid NOT segment",
+      segB is not None and segB.get("intent") == "tid",
+      repr((segB or {}).get("intent")))
+# Genuine collections still route to segment (collective noun present).
+check("all-stores-for-medplus still segment",
+      (detect_task("get me all the stores for medplus") or {}).get("intent")
+      == "segment")
+check("all-tids-of-nnpc-merchants still segment",
+      (detect_task("all the tids of the nnpc merchants") or {}).get("intent")
+      == "segment")
+check("all-addresses-of-all-nnpc-stations still segment",
+      (detect_task("get all the addresses of all nnpc stations") or {}).get("intent")
+      == "segment")
+# Live: the tid pipeline returns the merchant's FULL distinct terminal list.
+if segA:
+    rA = execute_task(segA)
+    tids = [r.get("tid") or r.get("TID") or "" for r in rA["rows"]]
+    tids = [t.strip() for t in tids if t.strip()]
+    check("all-tid-for-medplus full list (>= 100 rows)",
+          len(rA["rows"]) >= 100, f"{len(rA['rows'])} rows")
+    check("all-tid-for-medplus no duplicate TIDs",
+          len(tids) == len(set(tids)),
+          f"{len(tids)} rows vs {len(set(tids))} distinct")
+
 # ── Field-request noise stripping (regression: "get me the TID for X")
 print("\n[4c2] field-request noise stripping")
 from merchant_intelligence.matcher import strip_query_noise
