@@ -489,3 +489,114 @@ def reconcile_export(req: BatchRequest):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="Merchant_Reconciliation_Report.xlsx"'},
     )
+
+
+# ── Drift monitoring (roadmap #5 — quality scans) ───────────────────────
+
+@app.get("/drift-scan")
+@app.get("/v1/drift-scan")
+def drift_scan_endpoint():
+    """Run all drift quality scans (routing, recall, freshness)."""
+    from merchant_intelligence.drift import scan_all
+    _audit("drift_scan")
+    return scan_all()
+
+
+@app.get("/drift-history")
+@app.get("/v1/drift-history")
+def drift_history_endpoint(n: int = 20):
+    """Read recent drift scan history."""
+    from merchant_intelligence.drift import recent_history
+    return {"history": recent_history(n)}
+
+
+# ── Telemetry (roadmap #3 — observability) ──────────────────────────────
+
+@app.get("/telemetry")
+@app.get("/v1/telemetry")
+def telemetry_endpoint(n: int = 50, trace_type: str = None):
+    """Read recent telemetry records."""
+    from merchant_intelligence.telemetry import recent_telemetry
+    _audit("telemetry_view")
+    return {"records": recent_telemetry(n, trace_type)}
+
+
+@app.get("/telemetry/stats")
+@app.get("/v1/telemetry/stats")
+def telemetry_stats_endpoint():
+    """Aggregate telemetry stats for the admin dashboard."""
+    from merchant_intelligence.telemetry import telemetry_stats
+    return telemetry_stats()
+
+
+# ── Governed learned assets (roadmap #5) ────────────────────────────────
+
+@app.get("/assets/pending")
+@app.get("/v1/assets/pending")
+def assets_pending_endpoint():
+    """List all assets awaiting review."""
+    from merchant_intelligence.governed import get_pending_assets
+    _audit("assets_pending")
+    return {"pending": get_pending_assets()}
+
+
+@app.get("/assets/history")
+@app.get("/v1/assets/history")
+def assets_history_endpoint(n: int = 50, asset_type: str = None):
+    """Read recent asset events."""
+    from merchant_intelligence.governed import get_asset_history
+    return {"events": get_asset_history(asset_type, n)}
+
+
+@app.post("/assets/{asset_type}/{asset_id}/approve")
+@app.post("/v1/assets/{asset_type}/{asset_id}/approve")
+def assets_approve_endpoint(asset_type: str, asset_id: str, version: int):
+    """Approve a proposed asset version."""
+    from merchant_intelligence.governed import approve_asset
+    _audit("asset_approve", {"type": asset_type, "id": asset_id, "version": version})
+    return approve_asset(asset_type, asset_id, version)
+
+
+@app.post("/assets/{asset_type}/{asset_id}/reject")
+@app.post("/v1/assets/{asset_type}/{asset_id}/reject")
+def assets_reject_endpoint(asset_type: str, asset_id: str, version: int,
+                           reason: str = ""):
+    """Reject a proposed asset version."""
+    from merchant_intelligence.governed import reject_asset
+    _audit("asset_reject", {"type": asset_type, "id": asset_id, "version": version})
+    return reject_asset(asset_type, asset_id, version, reason=reason)
+
+
+@app.post("/assets/{asset_type}/{asset_id}/apply")
+@app.post("/v1/assets/{asset_type}/{asset_id}/apply")
+def assets_apply_endpoint(asset_type: str, asset_id: str, version: int):
+    """Apply an approved asset."""
+    from merchant_intelligence.governed import apply_asset
+    _audit("asset_apply", {"type": asset_type, "id": asset_id, "version": version})
+    return apply_asset(asset_type, asset_id, version)
+
+
+# ── Schema migration endpoint ───────────────────────────────────────────
+
+@app.post("/schema/migrate")
+@app.post("/v1/schema/migrate")
+def schema_migrate_endpoint():
+    """Run the normalized schema migration."""
+    from merchant_intelligence.schema import migrate, populate_identifiers, build_entity_clusters
+    _audit("schema_migrate")
+    result = migrate()
+    if result["ok"]:
+        result["identifiers"] = populate_identifiers()
+        result["clusters"] = build_entity_clusters()
+    return result
+
+
+# ── Incremental ingestion endpoint ──────────────────────────────────────
+
+@app.post("/ingestion/scan")
+@app.post("/v1/ingestion/scan")
+def ingestion_scan_endpoint():
+    """Run an incremental ingestion scan."""
+    from merchant_intelligence.ingestion import run_incremental_scan
+    _audit("ingestion_scan")
+    return run_incremental_scan()

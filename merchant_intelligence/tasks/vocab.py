@@ -128,6 +128,10 @@ _DEFAULT_INTENT_PATTERNS: Dict[str, List[Tuple[str, int]]] = {
         (r"\bomit\b", 2),
         (r"\buncomplete\b", 2),
     ],
+    'dealer_name': [
+        (r"\bdealer\s+name\b", 6),
+        (r"\btrading\s+name\b", 5),
+    ],
     'duplicates': [
         (r"\bduplicates?\b", 8),
         (r"\bappears? more than once\b", 7),
@@ -148,6 +152,11 @@ _DEFAULT_INTENT_PATTERNS: Dict[str, List[Tuple[str, int]]] = {
         (r"\bname variants?\b", 6),
         (r"\bpreviously known\b", 6),
         (r"\bknown as\b", 5),
+    ],
+    'merchant_id': [
+        (r"\bmerchant\s+id\b", 6),
+        (r"\bmerchant\s+ids\b", 6),
+        (r"\bmerchant\s+identification\b", 5),
     ],
     'mxcode': [
         (r"\bmx[- ]?codes?\b", 6),
@@ -192,6 +201,19 @@ _DEFAULT_INTENT_PATTERNS: Dict[str, List[Tuple[str, int]]] = {
         (r"\blink\b", 2),
         (r"\brelate\b", 2),
     ],
+    'settlement_account': [
+        (r"\bsettlement\s+account\b", 8),
+        (r"\bdealer\s+account\b", 7),
+        (r"\bsettlement\s+acct\b", 7),
+        (r"\bsettlement\s+account\s+number\b", 8),
+        (r"\bdealer\s+account\s+number\b", 7),
+    ],
+    'settlement_bank': [
+        (r"\bsettlement\s+bank\b", 8),
+        (r"\bdealer\s+bank\b", 7),
+        (r"\bsettlement\s+bank\s+name\b", 8),
+        (r"\bdealer\s+bank\s+name\b", 7),
+    ],
     'source': [
         (r"\bwhich (?:file|sheet)\b", 5),
         (r"\bwhat (?:file|sheet)\b", 5),
@@ -205,22 +227,8 @@ _DEFAULT_INTENT_PATTERNS: Dict[str, List[Tuple[str, int]]] = {
         (r"\bcountry\b", 2),
     ],
     'static_account': [
-        (r"\bstatic account\b", 8),
-        (r"\bstatic acct\b", 8),
-        (r"\bstatic acc\b", 8),
-        (r"\bstatic acct manager\b", 8),
-        (r"\bbeneficiary name\b", 7),
-        (r"\bstatic bank\b", 7),
-        (r"\bbeneficiary\b", 6),
-        (r"\bacct manager\b", 6),
-        (r"\baccount manager\b", 5),
-        (r"\bpayable code\b", 6),
-        (r"\bpayables?\b", 4),
-        (r"\bmapped to\b", 3),
-        (r"\baliases?\b", 3),
-        (r"\balias\b", 2),
-        (r"\bcollectable\ account\b", 2),
-        (r"\bcollectible\ account\b", 2),
+        (r"\\bstatic account\\b", 8),
+        (r"\bdealer\s+settlement\b", 5),
     ],
     'summary': [
         (r"\bsummar[a-z]*\b", 8),
@@ -253,29 +261,9 @@ _DEFAULT_INTENT_PATTERNS: Dict[str, List[Tuple[str, int]]] = {
         (r"\bassert\b", 2),
         (r"\brecord\b", 2),
     ],
-    'settlement_account': [
-        (r"\bsettlement\s+account\b", 8),
-        (r"\bdealer\s+account\b", 7),
-        (r"\bsettlement\s+acct\b", 7),
-        (r"\bsettlement\s+account\s+number\b", 8),
-        (r"\bdealer\s+account\s+number\b", 7),
-    ],
-    'settlement_bank': [
-        (r"\bsettlement\s+bank\b", 8),
-        (r"\bdealer\s+bank\b", 7),
-        (r"\bsettlement\s+bank\s+name\b", 8),
-        (r"\bdealer\s+bank\s+name\b", 7),
-    ],
-    'merchant_id': [
-        (r"\bmerchant\s+id\b", 6),
-        (r"\bmerchant\s+ids\b", 6),
-        (r"\bmerchant\s+identification\b", 5),
-    ],
-    'dealer_name': [
-        (r"\bdealer\s+name\b", 6),
-        (r"\btrading\s+name\b", 5),
-    ],
 }
+
+
 
 
 # ── Config loading (intents.json, tunable without code) ───────────────────

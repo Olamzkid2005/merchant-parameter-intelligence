@@ -22,3 +22,6 @@ rapidfuzz>=3.0
 jellyfish>=1.0
 numpy>=1.26
 nltk>=3.8
+
+# ── Security (field-level encryption at rest) ─────────────────────────────
+cryptography>=42.0

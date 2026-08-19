@@ -97,6 +97,16 @@ app.add_middleware(
 )
 
 @app.middleware("http")
+async def telemetry_middleware(request: Request, call_next):
+    """Structured request tracing (roadmap #3 — observability)."""
+    from merchant_intelligence.telemetry import trace_request
+    with trace_request(request.method, request.url.path) as span:
+        resp = await call_next(request)
+        span.status = resp.status_code
+    return resp
+
+
+@app.middleware("http")
 async def security_middleware(request: Request, call_next):
     """Opt-in authN/Z + field masking (roadmap #1, slice 2). When access
     control is disabled (the default) every request passes through
