@@ -1,0 +1,24 @@
+# Runtime + test dependencies for Merchant Parameter Intelligence.
+# Derived from module-level imports across api.py, api_shared.py, api_routes/,
+# merchant_intelligence/ and the test suites.
+#
+# The heavy optional accelerators (onnxruntime + tokenizers for the Tier-2
+# semantic encoder) are intentionally NOT listed: the semantic tier falls back
+# to the hashing encoder when data/models/ + onnxruntime are absent, and the
+# model artifacts themselves are gitignored anyway. CI runs the hermetic
+# suites with the hash encoder, exactly like a fresh checkout.
+
+# ── Core API layer ─────────────────────────────────────────────────────────
+fastapi>=0.141
+uvicorn>=0.52
+pydantic>=2.0
+
+# ── Data handling (exports, builds, pandas-backed routes) ──────────────────
+pandas>=2.0
+openpyxl>=3.1
+
+# ── Matching + NLU tiers ───────────────────────────────────────────────────
+rapidfuzz>=3.0
+jellyfish>=1.0
+numpy>=1.26
+nltk>=3.8

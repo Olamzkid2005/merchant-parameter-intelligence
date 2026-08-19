@@ -253,9 +253,29 @@ _DEFAULT_INTENT_PATTERNS: Dict[str, List[Tuple[str, int]]] = {
         (r"\bassert\b", 2),
         (r"\brecord\b", 2),
     ],
+    'settlement_account': [
+        (r"\bsettlement\s+account\b", 8),
+        (r"\bdealer\s+account\b", 7),
+        (r"\bsettlement\s+acct\b", 7),
+        (r"\bsettlement\s+account\s+number\b", 8),
+        (r"\bdealer\s+account\s+number\b", 7),
+    ],
+    'settlement_bank': [
+        (r"\bsettlement\s+bank\b", 8),
+        (r"\bdealer\s+bank\b", 7),
+        (r"\bsettlement\s+bank\s+name\b", 8),
+        (r"\bdealer\s+bank\s+name\b", 7),
+    ],
+    'merchant_id': [
+        (r"\bmerchant\s+id\b", 6),
+        (r"\bmerchant\s+ids\b", 6),
+        (r"\bmerchant\s+identification\b", 5),
+    ],
+    'dealer_name': [
+        (r"\bdealer\s+name\b", 6),
+        (r"\btrading\s+name\b", 5),
+    ],
 }
-
-
 
 
 # ── Config loading (intents.json, tunable without code) ───────────────────
@@ -462,6 +482,10 @@ _DEFAULT_INTENT_KEYWORDS: Dict[str, List[str]] = {
                   "lacking", "incomplete"],
     "top": ["top", "most common", "per state", "by state", "ranking"],
     "verify": ["verify", "in the registry", "registered", "valid"],
+    "settlement_account": ["settlement account", "dealer account", "settlement acct", "settlement account number"],
+    "settlement_bank": ["settlement bank", "dealer bank", "settlement bank name", "dealer bank name"],
+    "merchant_id": ["merchant id", "merchant ids", "merchant identification"],
+    "dealer_name": ["dealer name", "trading name"],
 }
 
 
@@ -604,6 +628,10 @@ CHAINABLE = {
     "profile": ("Full profiles", "get the full profiles for these"),
     "static_account": ("Static accounts", "get the static accounts and beneficiaries for these"),
     "verify": ("Verify", "check if these are in the registry"),
+    "settlement_account": ("Settlement accounts", "get the settlement accounts for these"),
+    "settlement_bank": ("Settlement banks", "get the settlement banks for these"),
+    "merchant_id": ("Merchant IDs", "get the merchant IDs for these"),
+    "dealer_name": ("Dealer names", "get the dealer names for these"),
 }
 
 # Intents whose pipelines can resolve a merchant NAME (not just identifiers).
@@ -615,7 +643,9 @@ NAME_CAPABLE_INTENTS = {"profile", "email", "phone", "mxcode", "static_account",
                         "account_number", "payable", "alias", "contact",
                         "onboarded", "state", "source", "beneficiary",
                         "related", "formerly", "verify", "count", "duplicates",
-                        "summary", "tid"}
+                        "summary", "tid",
+                        "settlement_account", "settlement_bank",
+                        "merchant_id", "dealer_name"}
 
 # Tokens stripped from a request when extracting the merchant name
 # (extract_names). Subset-union of QUERY_NOISE_WORDS + intent vocabulary —
@@ -980,6 +1010,10 @@ INTENT_GRAPH = {
     "count": {"requires": [], "produces": ["count"]},
     "duplicates": {"requires": [], "produces": ["clusters"]},
     "summary": {"requires": [], "produces": ["stats"]},
+    "settlement_account": {"requires": [], "produces": ["dealer_account_no"]},
+    "settlement_bank": {"requires": [], "produces": ["dealer_bank_name"]},
+    "merchant_id": {"requires": [], "produces": ["merchant_id"]},
+    "dealer_name": {"requires": [], "produces": ["dealer_name"]},
 }
 
 # Human step verbs for the workflow view ("resolve_mxcode ->
@@ -1013,6 +1047,10 @@ WORKFLOW_STEPS = {
     "count": "count_records",
     "duplicates": "find_duplicates",
     "summary": "summarize",
+    "settlement_account": "fetch_settlement_account",
+    "settlement_bank": "fetch_settlement_bank",
+    "merchant_id": "fetch_merchant_id",
+    "dealer_name": "fetch_dealer_name",
 }
 
 # Preposition anchors: the merchant name is the phrase AFTER the last anchor

@@ -1620,6 +1620,160 @@ def _pipeline_resolve(conn, task: Dict[str, Any]) -> Dict[str, Any]:
     return _pipeline_field(conn, task, "mxcode", "MX Code", task.get("intent", "resolve"))
 
 
+# ── Raw-data pipelines (NNPC dealer fields live in the raw_data JSON) ─────
+# Fields like DEALER ACCOUNT NO, DEALER BANK NAME, MERCHANTID, DEALER NAME
+# are stored in the raw_data JSON blob, not as direct DB columns. These
+# pipelines resolve identifiers -> rows, parse raw_data, and extract the
+# requested field.
+
+def _resolve_raw_rows(conn, values: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Like resolve_any but includes raw_data in the SELECT."""
+    from .db import _expand_confusables, confusable_key, _norm
+    out: Dict[str, Dict[str, Any]] = {}
+    if not values:
+        return out
+    expanded = _expand_confusables(values)
+    q = ",".join("?" for _ in expanded)
+    where = " OR ".join(f"UPPER(TRIM({c})) IN ({q})" for c in RESOLVE_COLS)
+    rows = _fetch(
+        conn,
+        f"SELECT id, merchant_name, tid, mxcode, phone, email, contact_name, "
+        f"address, account_name, account_number, payable_code, alias, bvn, "
+        f"merchant_id, static_acc_no, sheet_name, state, bank, onboarded_date, "
+        f"slip_header, terminal_serial, raw_data "
+        f"FROM merchants WHERE {where}",
+        expanded * len(RESOLVE_COLS),
+    )
+    for r in rows:
+        for field in RESOLVE_COLS:
+            key = _norm(r[field])
+            if not key:
+                continue
+            for v in values:
+                vu = v.upper().strip()
+                if vu in out:
+                    continue
+                if key == vu:
+                    out[vu] = r
+    for r in rows:
+        for field in RESOLVE_COLS:
+            key = _norm(r[field])
+            if not key:
+                continue
+            for v in values:
+                vu = v.upper().strip()
+                if vu in out:
+                    continue
+                if confusable_key(key) == confusable_key(vu):
+                    out[vu] = r
+    return out
+
+
+def _pipeline_raw_field(conn, task: Dict[str, Any], raw_key: str,
+                        label: str, intent: str) -> Dict[str, Any]:
+    """Identifiers -> one field from the raw_data JSON blob.
+
+    Unlike _pipeline_field which reads a direct DB column, this reads from
+    the raw_data JSON where NNPC dealer fields (settlement account, dealer
+    bank, merchant ID, dealer name) live.
+    """
+    idents = task["identifiers"]
+    values = [v for k in ID_KINDS for v in idents.get(k, [])]
+    resolved = _resolve_raw_rows(conn, values)
+    named = task.get("named", [])
+    rows, not_found = [], []
+
+    def _extract_raw(row: Dict[str, Any]) -> str:
+        raw = {}
+        try:
+            raw = json.loads(row.get("raw_data") or "{}")
+        except Exception:
+            pass
+        if isinstance(raw, dict):
+            return str(raw.get(raw_key, "") or "")
+        return ""
+
+    for v in values:
+        r = resolved.get(v.upper().strip())
+        if not r:
+            not_found.append({"id": v, "kind": "any", "reason": "not in registry"})
+            continue
+        field_val = _extract_raw(r)
+        status = _name_status(_name_for(named, v), r.get("merchant_name") or "")
+        rows.append({
+            "identifier": v,
+            "merchant": r.get("merchant_name") or "",
+            label: field_val,
+            "tid": r.get("tid") or "",
+            "mxcode": r.get("mxcode") or "",
+            "sheet": r.get("sheet_name") or "",
+            "status": status,
+        })
+
+    # Name-only requests
+    for n in task.get("names") or []:
+        name_rows = _resolve_name_rows(n)
+        if not name_rows:
+            not_found.append({
+                "id": n,
+                "kind": "name",
+                "reason": "name not in registry",
+            })
+            continue
+        seen_vals: set = set()
+        for rec in name_rows:
+            # Re-fetch with raw_data for each name-resolved row
+            tid_val = rec.get("tid") or ""
+            if tid_val:
+                rr = _resolve_raw_rows(conn, [tid_val])
+                full = rr.get(tid_val.upper().strip(), rec)
+            else:
+                full = rec
+            field_val = _extract_raw(full)
+            status = _name_status(n, rec.get("merchant_name") or "")
+            dedupe_val = str(field_val).strip().upper()
+            if dedupe_val and dedupe_val in seen_vals:
+                continue
+            if dedupe_val:
+                seen_vals.add(dedupe_val)
+            rows.append({
+                "identifier": n,
+                "merchant": rec.get("merchant_name") or "",
+                label: field_val,
+                "tid": tid_val,
+                "mxcode": rec.get("mxcode") or "",
+                "sheet": rec.get("sheet_name") or "",
+                "status": status,
+            })
+
+    src = f"{len(values)} identifier(s)" if values \
+        else f"{len(task.get('names') or [])} name(s)"
+    return {
+        "intent": intent,
+        "pipeline": [f"extract_{raw_key}"],
+        "summary": f"Pulled {label.lower()} for {len(rows)}/{src}.",
+        "columns": ["Identifier", "Merchant", label, "TID", "MX Code", "Source", "Status"],
+        "rows": rows,
+        "not_found": not_found,
+    }
+
+
+def _pipeline_settlement_account(conn, task):
+    return _pipeline_raw_field(conn, task, "DEALER ACCOUNT NO", "Settlement Account", "settlement_account")
+
+
+def _pipeline_settlement_bank(conn, task):
+    return _pipeline_raw_field(conn, task, "DEALER BANK NAME", "Settlement Bank", "settlement_bank")
+
+
+def _pipeline_merchant_id(conn, task):
+    return _pipeline_raw_field(conn, task, "MERCHANTID", "Merchant ID", "merchant_id")
+
+
+def _pipeline_dealer_name(conn, task):
+    return _pipeline_raw_field(conn, task, "DEALER NAME", "Dealer Name", "dealer_name")
+
+
 _PIPELINES = {
     "static_account": _pipeline_static_account,
     "tid": _pipeline_tid,
@@ -1649,6 +1803,10 @@ _PIPELINES = {
     "count": _pipeline_count,
     "duplicates": _pipeline_duplicates,
     "summary": _pipeline_summary,
+    "settlement_account": _pipeline_settlement_account,
+    "settlement_bank": _pipeline_settlement_bank,
+    "merchant_id": _pipeline_merchant_id,
+    "dealer_name": _pipeline_dealer_name,
 }
 
 

@@ -8,8 +8,11 @@ test_open_flag.py — verifies the --open flag wiring in app.start.
 """
 import py_compile
 import runpy
+import sys
 import webbrowser
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 ROOT = Path(__file__).resolve().parent.parent
 

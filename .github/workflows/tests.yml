@@ -1,0 +1,68 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  hermetic:
+    name: Hermetic suite (no data/ needed)
+    # The project is Windows-native (run.bat, app.start, .venv\Scripts layout)
+    # and some tests hardcode .venv/Scripts/python.exe — so CI runs on the
+    # same OS as the local environment.
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # test_api_split.py walks git history (git log -n 50 / git show) to
+          # compare the current route surface against the pre-split monolith.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Create venv (matches local .venv layout)
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        run: .venv/Scripts/python.exe -m pip install --upgrade pip && .venv/Scripts/python.exe -m pip install -r requirements.txt
+
+      # test_enrichment.py asserts wordnet_available() at the end of the run.
+      - name: Ensure WordNet corpus
+        run: .venv/Scripts/python.exe -c "import nltk; nltk.download('wordnet', quiet=True)"
+
+      # ── Hermetic suites only ─────────────────────────────────────────────
+      # The DB/server suites (test_tasks.py live sections, test_copilot.py
+      # live section, test_app_start.py, test_foreground_mode.py,
+      # test_next_level.py, test_autocomplete.py, test_identifier_search.py,
+      # test_new_features.py) assert REAL registry values from intelligence.db
+      # — which is built from gitignored proprietary Excel files in data/ and
+      # can never exist in CI. They run locally after `app.start rebuild`.
+      # Everything below passes on a fresh checkout with no data/ directory.
+      - name: Run hermetic suites
+        run: |
+          set -e
+          for t in \
+            test_audit.py \
+            test_auth.py \
+            test_enrichment.py \
+            test_semantic_shadow.py \
+            test_shadow_review.py \
+            test_intent_golden.py \
+            test_feedback.py \
+            test_ingest_ledger.py \
+            test_api_split.py \
+            test_engine_upgrades.py \
+            test_engine_v2.py \
+            test_open_flag.py \
+            test_watch_mode.py ; do
+            echo "=== $t ==="
+            .venv/Scripts/python.exe -X utf-8 tests/$t
+          done
+          echo ""
+          echo "ALL HERMETIC SUITES PASSED"
