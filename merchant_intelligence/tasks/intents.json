@@ -982,40 +982,99 @@
     },
     "settlement_account": {
       "patterns": [
-        {"pattern": "\\bsettlement\\s+account\\b", "weight": 8},
-        {"pattern": "\\bdealer\\s+account\\b", "weight": 7},
-        {"pattern": "\\bsettlement\\s+acct\\b", "weight": 7},
-        {"pattern": "\\bsettlement\\s+account\\s+number\\b", "weight": 8},
-        {"pattern": "\\bdealer\\s+account\\s+number\\b", "weight": 7}
+        {
+          "pattern": "\\bsettlement\\s+account\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bdealer\\s+account\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bsettlement\\s+acct\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bsettlement\\s+account\\s+number\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bdealer\\s+account\\s+number\\b",
+          "weight": 7
+        }
       ],
-      "keywords": ["settlement account", "dealer account", "settlement acct", "settlement account number"],
+      "keywords": [
+        "settlement account",
+        "dealer account",
+        "settlement acct",
+        "settlement account number"
+      ],
       "fuzzy": true
     },
     "settlement_bank": {
       "patterns": [
-        {"pattern": "\\bsettlement\\s+bank\\b", "weight": 8},
-        {"pattern": "\\bdealer\\s+bank\\b", "weight": 7},
-        {"pattern": "\\bsettlement\\s+bank\\s+name\\b", "weight": 8},
-        {"pattern": "\\bdealer\\s+bank\\s+name\\b", "weight": 7}
+        {
+          "pattern": "\\bsettlement\\s+bank\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bdealer\\s+bank\\b",
+          "weight": 7
+        },
+        {
+          "pattern": "\\bsettlement\\s+bank\\s+name\\b",
+          "weight": 8
+        },
+        {
+          "pattern": "\\bdealer\\s+bank\\s+name\\b",
+          "weight": 7
+        }
       ],
-      "keywords": ["settlement bank", "dealer bank", "settlement bank name", "dealer bank name"],
+      "keywords": [
+        "settlement bank",
+        "dealer bank",
+        "settlement bank name",
+        "dealer bank name"
+      ],
       "fuzzy": true
     },
     "merchant_id": {
       "patterns": [
-        {"pattern": "\\bmerchant\\s+id\\b", "weight": 6},
-        {"pattern": "\\bmerchant\\s+ids\\b", "weight": 6},
-        {"pattern": "\\bmerchant\\s+identification\\b", "weight": 5}
+        {
+          "pattern": "\\bmerchant\\s+id\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bmerchant\\s+ids\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\bmerchant\\s+identification\\b",
+          "weight": 5
+        }
       ],
-      "keywords": ["merchant id", "merchant ids", "merchant identification"],
+      "keywords": [
+        "merchant id",
+        "merchant ids",
+        "merchant identification"
+      ],
       "fuzzy": true
     },
     "dealer_name": {
       "patterns": [
-        {"pattern": "\\bdealer\\s+name\\b", "weight": 6},
-        {"pattern": "\\btrading\\s+name\\b", "weight": 5}
+        {
+          "pattern": "\\bdealer\\s+name\\b",
+          "weight": 6
+        },
+        {
+          "pattern": "\\btrading\\s+name\\b",
+          "weight": 5
+        }
       ],
-      "keywords": ["dealer name", "trading name"],
+      "keywords": [
+        "dealer name",
+        "trading name"
+      ],
       "fuzzy": true
     }
   }
