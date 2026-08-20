@@ -493,8 +493,8 @@ def reconcile_export(req: BatchRequest):
 
 # ── Drift monitoring (roadmap #5 — quality scans) ───────────────────────
 
-@app.get("/drift-scan")
-@app.get("/v1/drift-scan")
+@router.get("/drift-scan")
+@router.get("/v1/drift-scan")
 def drift_scan_endpoint():
     """Run all drift quality scans (routing, recall, freshness)."""
     from merchant_intelligence.drift import scan_all
@@ -502,8 +502,8 @@ def drift_scan_endpoint():
     return scan_all()
 
 
-@app.get("/drift-history")
-@app.get("/v1/drift-history")
+@router.get("/drift-history")
+@router.get("/v1/drift-history")
 def drift_history_endpoint(n: int = 20):
     """Read recent drift scan history."""
     from merchant_intelligence.drift import recent_history
@@ -512,8 +512,8 @@ def drift_history_endpoint(n: int = 20):
 
 # ── Telemetry (roadmap #3 — observability) ──────────────────────────────
 
-@app.get("/telemetry")
-@app.get("/v1/telemetry")
+@router.get("/telemetry")
+@router.get("/v1/telemetry")
 def telemetry_endpoint(n: int = 50, trace_type: str = None):
     """Read recent telemetry records."""
     from merchant_intelligence.telemetry import recent_telemetry
@@ -521,8 +521,8 @@ def telemetry_endpoint(n: int = 50, trace_type: str = None):
     return {"records": recent_telemetry(n, trace_type)}
 
 
-@app.get("/telemetry/stats")
-@app.get("/v1/telemetry/stats")
+@router.get("/telemetry/stats")
+@router.get("/v1/telemetry/stats")
 def telemetry_stats_endpoint():
     """Aggregate telemetry stats for the admin dashboard."""
     from merchant_intelligence.telemetry import telemetry_stats
@@ -531,8 +531,8 @@ def telemetry_stats_endpoint():
 
 # ── Governed learned assets (roadmap #5) ────────────────────────────────
 
-@app.get("/assets/pending")
-@app.get("/v1/assets/pending")
+@router.get("/assets/pending")
+@router.get("/v1/assets/pending")
 def assets_pending_endpoint():
     """List all assets awaiting review."""
     from merchant_intelligence.governed import get_pending_assets
@@ -540,16 +540,16 @@ def assets_pending_endpoint():
     return {"pending": get_pending_assets()}
 
 
-@app.get("/assets/history")
-@app.get("/v1/assets/history")
+@router.get("/assets/history")
+@router.get("/v1/assets/history")
 def assets_history_endpoint(n: int = 50, asset_type: str = None):
     """Read recent asset events."""
     from merchant_intelligence.governed import get_asset_history
     return {"events": get_asset_history(asset_type, n)}
 
 
-@app.post("/assets/{asset_type}/{asset_id}/approve")
-@app.post("/v1/assets/{asset_type}/{asset_id}/approve")
+@router.post("/assets/{asset_type}/{asset_id}/approve")
+@router.post("/v1/assets/{asset_type}/{asset_id}/approve")
 def assets_approve_endpoint(asset_type: str, asset_id: str, version: int):
     """Approve a proposed asset version."""
     from merchant_intelligence.governed import approve_asset
@@ -557,8 +557,8 @@ def assets_approve_endpoint(asset_type: str, asset_id: str, version: int):
     return approve_asset(asset_type, asset_id, version)
 
 
-@app.post("/assets/{asset_type}/{asset_id}/reject")
-@app.post("/v1/assets/{asset_type}/{asset_id}/reject")
+@router.post("/assets/{asset_type}/{asset_id}/reject")
+@router.post("/v1/assets/{asset_type}/{asset_id}/reject")
 def assets_reject_endpoint(asset_type: str, asset_id: str, version: int,
                            reason: str = ""):
     """Reject a proposed asset version."""
@@ -567,8 +567,8 @@ def assets_reject_endpoint(asset_type: str, asset_id: str, version: int,
     return reject_asset(asset_type, asset_id, version, reason=reason)
 
 
-@app.post("/assets/{asset_type}/{asset_id}/apply")
-@app.post("/v1/assets/{asset_type}/{asset_id}/apply")
+@router.post("/assets/{asset_type}/{asset_id}/apply")
+@router.post("/v1/assets/{asset_type}/{asset_id}/apply")
 def assets_apply_endpoint(asset_type: str, asset_id: str, version: int):
     """Apply an approved asset."""
     from merchant_intelligence.governed import apply_asset
@@ -578,8 +578,8 @@ def assets_apply_endpoint(asset_type: str, asset_id: str, version: int):
 
 # ── Schema migration endpoint ───────────────────────────────────────────
 
-@app.post("/schema/migrate")
-@app.post("/v1/schema/migrate")
+@router.post("/schema/migrate")
+@router.post("/v1/schema/migrate")
 def schema_migrate_endpoint():
     """Run the normalized schema migration."""
     from merchant_intelligence.schema import migrate, populate_identifiers, build_entity_clusters
@@ -593,8 +593,8 @@ def schema_migrate_endpoint():
 
 # ── Incremental ingestion endpoint ──────────────────────────────────────
 
-@app.post("/ingestion/scan")
-@app.post("/v1/ingestion/scan")
+@router.post("/ingestion/scan")
+@router.post("/v1/ingestion/scan")
 def ingestion_scan_endpoint():
     """Run an incremental ingestion scan."""
     from merchant_intelligence.ingestion import run_incremental_scan

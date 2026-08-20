@@ -48,7 +48,8 @@ logger = logging.getLogger(__name__)
 FIELD_EXTRACT_INTENTS = {
     "email", "phone", "mxcode", "tid", "address", "bank", "account_name",
     "account_number", "payable", "alias", "contact", "onboarded", "state",
-    "source", "beneficiary",
+    "source", "beneficiary", "settlement_account", "settlement_bank",
+    "merchant_id", "dealer_name",
 }
 
 
@@ -189,6 +190,12 @@ def detect_task(
     elif (intents[0] == "change_details" and n_ids == 0
           and extract_names(t)):
         # "change of account details for X" — the change phrase IS the request.
+        is_task = True
+    elif (n_ids == 0 and any(i in ("settlement_account", "settlement_bank",
+                                   "merchant_id", "dealer_name") for i in intents)
+          and extract_names(t)):
+        # Dealer/settlement field requests without a verb: "settlement account
+        # for BAMIDELE ADEWUYI" / "dealer bank for 2103O380" (name path).
         is_task = True
     elif "segment" in intents and n_ids == 0:
         is_task = True

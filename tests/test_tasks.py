@@ -2067,7 +2067,7 @@ def api_post(path, payload):
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()[:200]
     except Exception as e:
-        return None, str(e)
+        return None, {"_error": str(e)}
 
 
 status, body = api_post("/api/task", {"text": example})
@@ -2093,7 +2093,7 @@ def api_get(path):
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()[:200]
     except Exception as e:
-        return None, str(e)
+        return None, {"_error": str(e)}
 
 
 def api_put(path, payload):
@@ -2109,10 +2109,24 @@ def api_put(path, payload):
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode()[:200]
     except Exception as e:
-        return None, str(e)
+        return None, {"_error": str(e)}
 
 
-s_int, cfg_int = api_get("/api/intents")
+# ── Check if the live server is running before hitting API endpoints ──
+try:
+    _sr = urllib.request.urlopen("http://127.0.0.1:8000/api/health", timeout=3)
+    _SERVER_ALIVE = _sr.status == 200
+    _sr.close()
+except Exception:
+    _SERVER_ALIVE = False
+if not _SERVER_ALIVE:
+    print("  [SKIP] live-server sections (5-5h): API not running on :8000")
+
+
+if _SERVER_ALIVE:
+    s_int, cfg_int = api_get("/api/intents")
+else:
+    s_int, cfg_int = None, {}
 check("GET /api/intents returns 200", s_int == 200, str(s_int))
 check("GET returns intents dict with email",
       isinstance(cfg_int.get("intents"), dict) and "email" in (cfg_int.get("intents") or {}),
@@ -2231,19 +2245,19 @@ check("GET /api/calibration returns 200", _s_cal == 200, str(_s_cal))
 check("calibration payload has stats + fit + params",
       isinstance(_b_cal, dict) and "stats" in _b_cal and "fit" in _b_cal
       and "params" in _b_cal, repr(_b_cal)[:160])
-if isinstance(_b_cal, dict):
+if isinstance(_b_cal, dict) and "stats" in _b_cal:
     check("calibration stats have decisions + bands",
           "decisions" in _b_cal["stats"] and isinstance(_b_cal["stats"].get("bands"), list),
           repr(_b_cal["stats"])[:160])
     check("calibration params carry ask threshold",
-          isinstance(_b_cal["params"].get("ask_threshold"), int),
-          repr(_b_cal["params"]))
+          isinstance(_b_cal.get("params", {}).get("ask_threshold"), int),
+          repr(_b_cal.get("params", {})))
     # The race-window fit is a first-class threshold now — pin the contract
     # so a stale server (ask-only fit) fails instead of silently rendering
     # the default gap forever in the Rule Engine panel.
     check("calibration params carry the race-window threshold",
-          isinstance(_b_cal["params"].get("gap_threshold"), (int, float))
-          and "gap_active" in _b_cal["params"], repr(_b_cal["params"]))
+          isinstance(_b_cal.get("params", {}).get("gap_threshold"), (int, float))
+          and "gap_active" in _b_cal.get("params", {}), repr(_b_cal.get("params", {})))
     check("calibration stats expose race-gap bands",
           isinstance(_b_cal["stats"].get("gap_bands"), list)
           and "race_decisions" in _b_cal["stats"],
@@ -2258,13 +2272,13 @@ if isinstance(_b_cal, dict):
           repr(_b_cal["stats"].get("sources")))
 
 # Running a decisive task records an auto decision.
-_s_before = _b_cal["stats"]["decisions"] if isinstance(_b_cal, dict) else 0
+_s_before = _b_cal["stats"]["decisions"] if isinstance(_b_cal, dict) and "stats" in _b_cal else 0
 _s_run, _b_run = api_post("/api/task", {"text": "get me all the information on medplus"})
 _s_after, _b_after = api_get("/api/calibration")
 check("auto-routed task logs a calibration decision",
       _s_run == 200 and _s_after == 200
-      and _b_after["stats"]["decisions"] == _s_before + 1,
-      f"before={_s_before} after={_b_after['stats']['decisions']}")
+      and _b_after.get("stats", {}).get("decisions") == _s_before + 1,
+      f"before={_s_before} after={_b_after.get('stats', {}).get('decisions', '?')}")
 
 # The reset endpoint is intentionally NOT called here — it wipes the REAL
 # data/request_log.jsonl the live server writes to (destructive). Reset
