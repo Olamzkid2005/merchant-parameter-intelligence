@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import config
+from .intents import _detect_negated_intents
 from .vocab import INTENT_KEYWORDS, _lower
 
 logger = logging.getLogger(__name__)
@@ -487,12 +488,16 @@ def _gate_for(intent: str) -> Tuple[int, int]:
 
 @lru_cache(maxsize=256)
 def _rank_cached(masked: str, fingerprint: str, encoder_id: str,
-                 gate_fp: str) -> Optional[Dict[str, Any]]:
+                 gate_fp: str,
+                 negated_fp: str = "") -> Optional[Dict[str, Any]]:
     """Rank the masked query against every intent's exemplars (cached).
 
     Cache key = masked text + exemplar fingerprint + encoder id + gate
-    fingerprint, so a config hot-reload, model swap, or a review label that
-    moves a fitted gate can never serve stale vectors or stale gates.
+    fingerprint + negation fingerprint, so a config hot-reload, model swap,
+    or a review label that moves a fitted gate can never serve stale vectors
+    or stale gates.  Negated intents (detected from the ORIGINAL text before
+    masking) are excluded from the winner selection — a user who says
+    "...but not the change history" must never get change_details back.
     """
     exemplars = load_exemplars()
     if not exemplars:
@@ -500,6 +505,8 @@ def _rank_cached(masked: str, fingerprint: str, encoder_id: str,
     enc = _make_encoder()
     qv = enc.encode([masked])[0]
     per_intent: Dict[str, Tuple[float, str]] = {}
+    # Decode negated intents from the cache-friendly fingerprint string.
+    negated = frozenset(negated_fp.split("|")) if negated_fp else frozenset()
     winner: Optional[Tuple[str, str, float]] = None  # (intent, exemplar, cos)
     for intent, phrases in _get_exemplar_vecs(exemplars, enc).items():
         best_cos, best_ph = 0.0, phrases[0][0]
@@ -508,6 +515,12 @@ def _rank_cached(masked: str, fingerprint: str, encoder_id: str,
             if c > best_cos:
                 best_cos, best_ph = c, ph
         per_intent[intent] = (best_cos, best_ph)
+        # Skip negated intents — they must never win.  We still record their
+        # scores in per_intent so the margin gate can reference them (the
+        # runner-up might be negated, which is fine — it just lowers the
+        # margin the winner needs to clear).
+        if intent in negated:
+            continue
         if winner is None or best_cos > winner[2]:
             winner = (intent, best_ph, best_cos)
     if winner is None:
@@ -545,13 +558,23 @@ def resolve(text: str, task: Optional[Dict[str, Any]] = None) -> Optional[Dict[s
     intent, and `would_act` — whether the decision clears the threshold +
     margin gates. Shadow callers log this via log_shadow(); enabled callers
     act on `would_act` directly.
+
+    Negation awareness (§11 fix): the original text is scanned for negation
+    markers ("but not ...", "except ...", "without ...") before masking.
+    Any intent caught by a negation marker is excluded from the winner
+    selection, so "account details but not the change history" never picks
+    change_details even when the exemplars score it highest.
     """
     masked = mask_query(text, task)
     exemplars = load_exemplars()
     if not exemplars:
         return None
+    # Detect negated intents from the ORIGINAL text (before masking strips
+    # identifiers/names that the negation window might reference).
+    negated = _detect_negated_intents(text or "")
+    negated_fp = "|".join(sorted(negated)) if negated else ""
     return _rank_cached(masked, _fingerprint(exemplars), _make_encoder().id,
-                        _gate_fingerprint())
+                        _gate_fingerprint(), negated_fp)
 
 
 # ── Shadow log (Phase 1) ──────────────────────────────────────────────────
