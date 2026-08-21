@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 
 # The Excel workbook to search
-EXCEL_FILE = DATA_DIR / "2ISW_Parameter_File 5.xlsx"
+EXCEL_FILE = DATA_DIR / "2ISW_Parameter_File.xlsx"
 
 # Where the SQLite database lives
 DB_DIR = DATA_DIR

@@ -521,6 +521,11 @@ class MerchantMatcher:
         # groups — this survives the in-place alias merge, which otherwise
         # preserves the bare sibling's earlier insertion position. Non-ties are
         # unaffected (stable sort, primary key dominates).
+        # 5. Family expansion — when a search finds a strong match, also
+        # Sort and cap the main results first, THEN run family expansion
+        # on the capped set.  This ensures the family expansion only skips
+        # TIDs the user actually sees (not TIDs from fuzzy matches that
+        # were trimmed by the limit).
         all_results.sort(
             key=lambda r: (
                 r.overall_score,
@@ -528,7 +533,140 @@ class MerchantMatcher:
             ),
             reverse=True,
         )
-        return all_results[:limit]
+        main_capped = all_results[:limit]
+
+        # 5. Family expansion — when a search finds a strong match, also
+        #    surface other terminals sharing the same MX code or contact
+        #    email.  This catches families like MEGALEK (56 hospital
+        #    terminals under one MX174102) that would otherwise require
+        #    knowing the MX code to discover.  Family results are ALWAYS
+        #    appended in full — they are not capped by the search limit.
+        family_results = self._family_expansion(main_capped)
+        if family_results:
+            main_capped.extend(family_results)
+        return main_capped
+
+    # ── Family expansion ────────────────────────────────────────────────
+
+    def _family_expansion(self,
+                          results: List[SearchResult]) -> List[SearchResult]:
+        """Find sibling terminals sharing MX codes or contact emails.
+
+        After the main search finds e.g. 'MEGALEK LIMITED', this probes
+        the DB for all rows with the same mxcode (MX174102) or contact
+        email, adding them as 'Family Match' results so the user sees
+        the full family in one search.
+        """
+        # Collect linkage keys ONLY from high-confidence results.
+        # The main pipeline may return many results for 'MEGALEK' (fuzzy
+        # hits on ADELEKE, REMILEKUN, etc.), but only the top-scored
+        # ones are actually part of the target family.  First find the
+        # dominant MX code from the best results, then collect emails
+        # ONLY from results sharing that MX code (or having no MX code
+        # but matching the family contact).
+        mx_codes: Set[str] = set()
+        contact_emails: Set[str] = set()
+        # Dedup by TID — but ONLY from results sharing the dominant
+        # MX code.  TIDs from unrelated fuzzy matches (ADELEKE etc.)
+        # must NOT block family expansion — those TIDs were never
+        # returned to the user.
+        seen_tids: Set[str] = set()
+
+        # Step 1: find the dominant MX code from top results
+        dominant_mx = None
+        mx_counts: Dict[str, int] = {}
+        for r in results:
+            if r.overall_score < 80:
+                break
+            mx = (r.record.get("mxcode") or "").strip().upper()
+            if mx and mx.startswith("MX"):
+                mx_counts[mx] = mx_counts.get(mx, 0) + 1
+        if mx_counts:
+            dominant_mx = max(mx_counts, key=mx_counts.get)
+            mx_codes.add(dominant_mx)
+
+        # Step 2: collect emails only from results sharing the dominant MX
+        # (or having no MX but being in the top 5 — likely the HQ entry)
+        for r in results:
+            if r.overall_score < 80:
+                break
+            rec = r.record
+            mx = (rec.get("mxcode") or "").strip().upper()
+            email = (rec.get("email") or "").strip().lower()
+            if not email or "@" not in email:
+                continue
+            if dominant_mx and mx == dominant_mx:
+                contact_emails.add(email)
+            elif not mx and r.overall_score >= 85:
+                # HQ entry without MX code (e.g. MEGALEK LIMITED 2ISW266C)
+                contact_emails.add(email)
+
+        # Step 3: mark TIDs already returned by the main search ONLY
+        # when they belong to the same family (dominant MX or same email).
+        for r in results:
+            tid = (r.record.get("tid") or "").strip().upper()
+            if not tid:
+                continue
+            mx = (r.record.get("mxcode") or "").strip().upper()
+            em = (r.record.get("email") or "").strip().lower()
+            if (dominant_mx and mx == dominant_mx) or em in contact_emails:
+                seen_tids.add(tid)
+
+        if not mx_codes and not contact_emails:
+            return []
+
+        # Query DB for siblings
+        db = self.db
+        siblings: List[Dict[str, Any]] = []
+        try:
+            with db._lock:
+                conn = db._get_connection()
+                c = conn.cursor()
+                conditions = []
+                params: list = []
+                for mx in mx_codes:
+                    conditions.append("UPPER(mxcode) = ?")
+                    params.append(mx)
+                for em in contact_emails:
+                    conditions.append("LOWER(email) = ?")
+                    params.append(em)
+                if not conditions:
+                    return []
+                query = (
+                    f"SELECT * FROM merchants WHERE "
+                    f"{' OR '.join(conditions)}"
+                )
+                c.execute(query, params)
+                siblings = [dict(row) for row in c.fetchall()]
+        except Exception as exc:
+            logger.debug("Family expansion query failed: %s", exc)
+            return []
+
+        # Build results for siblings not already in the main set.
+        # Dedup by TID: if the main search already returned a row
+        # for TID X (even from a different sheet), skip all other
+        # rows for that TID.
+        family: List[SearchResult] = []
+        for row in siblings:
+            tid = (row.get("tid") or "").strip().upper()
+            if tid in seen_tids:
+                continue
+            seen_tids.add(tid)
+            result = SearchResult(row.get("id"), row)
+            result.overall_score = 85.0  # family matches are high-confidence
+            result.match_type = "Family Match"
+            # Tag with the linkage key that found them
+            mx = (row.get("mxcode") or "").strip().upper()
+            email = (row.get("email") or "").strip().lower()
+            if mx and mx in mx_codes:
+                result.matched_tokens = [f"family:{mx}"]
+            elif email and email in contact_emails:
+                result.matched_tokens = [f"family:{email}"]
+            else:
+                result.matched_tokens = ["family:linkage"]
+            family.append(result)
+
+        return family
 
     # ── Alias-backed search (Phase 2 integration) ─────────────────────────
 

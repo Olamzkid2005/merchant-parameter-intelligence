@@ -1114,7 +1114,7 @@ def verify_search(db_path: Optional[Path] = None) -> bool:
         checks = [
             ("merchant_category_code", "MCC (2ISW_Parameter)",
              "SELECT COUNT(*) FROM merchants WHERE merchant_category_code != '' "
-             "AND sheet_name LIKE '2ISW_Parameter_File 5 :: 2ISW_Parameter%'"),
+             "AND sheet_name LIKE '2ISW_Parameter_File :: 2ISW_Parameter%'"),
             ("settlement_type", "Settlement type (Sameday)",
              "SELECT COUNT(*) FROM merchants WHERE settlement_type != '' "
              "AND sheet_name LIKE '%Sameday%'"),
