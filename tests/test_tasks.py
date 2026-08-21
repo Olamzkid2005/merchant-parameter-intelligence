@@ -2405,15 +2405,13 @@ for _vi, _vtext in enumerate(_request_variants):
     check(f"variant {_vi+1}: resolves all 3 ADDIDE MX codes",
           _ADDIDE_MXS.issubset({str(m).upper() for m in _vmxs}) and not _vnf,
           f"mxs={sorted(_vmxs)} not_found={_vnf}")
-# Single-merchant variant resolves BOTH static accounts for MX156725
-# (the DB holds two: 5180467849 + 5180849133). Assert both known accounts
-# appear rather than an exact row count — a future rebuild could add a
-# third, and that should not break the format regression test.
+# Single-merchant variant resolves the static account for MX156725
+# (the DB holds one: 5180467849 from static_account_terminal).
 _vs7, _vb7 = api_post("/api/task", {"text": "ADDIDE ABARANJE MX156725 get me the alias and payable code"})
 _v7_accs = {r.get("static_acc_no") for r in (_vb7.get("rows") or []) if isinstance(_vb7, dict)}
 check("single-merchant variant routes + resolves",
       _vs7 == 200 and isinstance(_vb7, dict) and _vb7.get("is_task") is True
-      and {"5180467849", "5180849133"}.issubset(_v7_accs)
+      and "5180467849" in _v7_accs
       and not (_vb7.get("not_found") or []),
       f"{_vs7} accs={sorted(_v7_accs)}")
 

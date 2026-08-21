@@ -470,6 +470,11 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
                 continue
             if val:
                 seen_vals.add(val)
+            # For address requests, skip rows that have no address —
+            # rows from static_account / MRSP sheets lack the address
+            # column and should not pollute the address result set.
+            if intent == "address" and not (rec.get("address") or "").strip():
+                continue
             if by_address:
                 status = "address_match"
             elif all_rows:
