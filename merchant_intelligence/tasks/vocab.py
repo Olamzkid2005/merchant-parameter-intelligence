@@ -186,6 +186,7 @@ _DEFAULT_INTENT_PATTERNS: Dict[str, List[Tuple[str, int]]] = {
         (r"\binformation\b", 4),
         (r"\bdetails?\b", 3),
         (r"\binfo\b", 3),
+        (r"\baccount\s+medplus\b", 7),
     ],
     'related': [
         (r"\bwho else\b", 8),
@@ -227,7 +228,7 @@ _DEFAULT_INTENT_PATTERNS: Dict[str, List[Tuple[str, int]]] = {
         (r"\bcountry\b", 2),
     ],
     'static_account': [
-        (r"\bstatic account\b", 8),
+        (r"\\bstatic account\\b", 8),
         (r"\bdealer\s+settlement\b", 5),
     ],
     'summary': [
@@ -262,6 +263,20 @@ _DEFAULT_INTENT_PATTERNS: Dict[str, List[Tuple[str, int]]] = {
         (r"\brecord\b", 2),
     ],
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

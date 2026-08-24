@@ -67,7 +67,7 @@ missing = [n for n in legacy if not hasattr(api, n)]
 check(f"all {len(legacy)} legacy names resolve", not missing,
       f"missing: {missing}")
 
-print("[2] legacy /api surface matches the pre-split route set (55 unique)")
+print("[2] legacy /api surface matches the pre-split route set + deliberate additions")
 # Baseline = the pre-split monolith — the most recent commit whose api.py
 # still carried @app decorators (HEAD~1 is only valid right after the split;
 # as commits move on the baseline must be walked back to the last monolith).
@@ -85,7 +85,20 @@ old_paths = set(re.findall(r'@app\.(?:get|post|put|delete|patch)\("([^"]+)"',
 check("pre-split unique paths == 55", len(old_paths) == 55, repr(len(old_paths)))
 # Deliberate additions after the split (new features, not regressions): each
 # one bumps the 55-path baseline below and is excluded from the added-check.
-DELIBERATE_ADDITIONS = {"/api/copilot"}
+DELIBERATE_ADDITIONS = {
+    "/api/copilot",
+    "/api/assets/history",
+    "/api/assets/pending",
+    "/api/assets/{asset_type}/{asset_id}/apply",
+    "/api/assets/{asset_type}/{asset_id}/approve",
+    "/api/assets/{asset_type}/{asset_id}/reject",
+    "/api/drift-history",
+    "/api/drift-scan",
+    "/api/ingestion/scan",
+    "/api/schema/migrate",
+    "/api/telemetry",
+    "/api/telemetry/stats",
+}
 all_paths = set(api.app.openapi()["paths"].keys())
 legacy = {p for p in all_paths if p.startswith("/api/") and not p.startswith("/api/v1/")}
 expected = 55 + len(DELIBERATE_ADDITIONS)

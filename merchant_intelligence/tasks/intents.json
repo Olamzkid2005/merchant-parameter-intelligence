@@ -14,8 +14,7 @@
       "keywords": [
         "account name",
         "account holder"
-      ],
-      "fuzzy": true
+      ]
     },
     "account_number": {
       "patterns": [
@@ -31,8 +30,7 @@
       "keywords": [
         "account number",
         "acc number"
-      ],
-      "fuzzy": true
+      ]
     },
     "address": {
       "patterns": [
@@ -50,8 +48,7 @@
         "addresses",
         "location",
         "locations"
-      ],
-      "fuzzy": true
+      ]
     },
     "alias": {
       "patterns": [
@@ -83,8 +80,7 @@
       "keywords": [
         "alias",
         "alias code"
-      ],
-      "fuzzy": true
+      ]
     },
     "bank": {
       "patterns": [
@@ -115,8 +111,7 @@
         "bank name",
         "which bank",
         "what bank"
-      ],
-      "fuzzy": true
+      ]
     },
     "beneficiary": {
       "patterns": [
@@ -127,8 +122,7 @@
       ],
       "keywords": [
         "beneficiary"
-      ],
-      "fuzzy": true
+      ]
     },
     "change_details": {
       "patterns": [
@@ -258,8 +252,7 @@
         "new address",
         "change history",
         "account details"
-      ],
-      "fuzzy": true
+      ]
     },
     "compare": {
       "patterns": [
@@ -294,8 +287,7 @@
         "vs",
         "side by side",
         "difference between"
-      ],
-      "fuzzy": true
+      ]
     },
     "contact": {
       "patterns": [
@@ -312,8 +304,7 @@
         "contact",
         "contact person",
         "contact name"
-      ],
-      "fuzzy": true
+      ]
     },
     "count": {
       "patterns": [
@@ -351,8 +342,7 @@
         "count",
         "number of",
         "total number of"
-      ],
-      "fuzzy": true
+      ]
     },
     "coverage": {
       "patterns": [
@@ -413,8 +403,7 @@
         "has no",
         "lacking",
         "incomplete"
-      ],
-      "fuzzy": true
+      ]
     },
     "dealer_name": {
       "patterns": [
@@ -430,8 +419,7 @@
       "keywords": [
         "dealer name",
         "trading name"
-      ],
-      "fuzzy": true
+      ]
     },
     "duplicates": {
       "patterns": [
@@ -469,8 +457,7 @@
         "same merchant",
         "repeated",
         "more than once"
-      ],
-      "fuzzy": true
+      ]
     },
     "email": {
       "patterns": [
@@ -491,8 +478,7 @@
         "email",
         "emails",
         "e-mail"
-      ],
-      "fuzzy": true
+      ]
     },
     "formerly": {
       "patterns": [
@@ -523,8 +509,7 @@
         "name variants",
         "known as",
         "previously known"
-      ],
-      "fuzzy": true
+      ]
     },
     "merchant_id": {
       "patterns": [
@@ -545,8 +530,7 @@
         "merchant id",
         "merchant ids",
         "merchant identification"
-      ],
-      "fuzzy": true
+      ]
     },
     "mxcode": {
       "patterns": [
@@ -563,8 +547,7 @@
         "mxcode",
         "mx code",
         "merchant code"
-      ],
-      "fuzzy": true
+      ]
     },
     "onboarded": {
       "patterns": [
@@ -580,8 +563,7 @@
       "keywords": [
         "onboarded",
         "onboarding date"
-      ],
-      "fuzzy": true
+      ]
     },
     "payable": {
       "patterns": [
@@ -597,8 +579,7 @@
       "keywords": [
         "payable",
         "payable code"
-      ],
-      "fuzzy": true
+      ]
     },
     "phone": {
       "patterns": [
@@ -623,8 +604,7 @@
         "phone",
         "telephone",
         "mobile number"
-      ],
-      "fuzzy": true
+      ]
     },
     "profile": {
       "patterns": [
@@ -663,6 +643,10 @@
         {
           "pattern": "\\binfo\\b",
           "weight": 3
+        },
+        {
+          "pattern": "\\baccount\\s+medplus\\b",
+          "weight": 7
         }
       ],
       "keywords": [
@@ -675,8 +659,7 @@
         "anything on",
         "details",
         "info"
-      ],
-      "fuzzy": true
+      ]
     },
     "related": {
       "patterns": [
@@ -735,8 +718,7 @@
         "linked to",
         "connected",
         "associated"
-      ],
-      "fuzzy": true
+      ]
     },
     "settlement_account": {
       "patterns": [
@@ -766,8 +748,7 @@
         "dealer account",
         "settlement acct",
         "settlement account number"
-      ],
-      "fuzzy": true
+      ]
     },
     "settlement_bank": {
       "patterns": [
@@ -793,8 +774,7 @@
         "dealer bank",
         "settlement bank name",
         "dealer bank name"
-      ],
-      "fuzzy": true
+      ]
     },
     "source": {
       "patterns": [
@@ -819,8 +799,7 @@
         "source",
         "which file",
         "which sheet"
-      ],
-      "fuzzy": true
+      ]
     },
     "state": {
       "patterns": [
@@ -843,8 +822,7 @@
       ],
       "keywords": [
         "state"
-      ],
-      "fuzzy": true
+      ]
     },
     "static_account": {
       "patterns": [
@@ -866,8 +844,7 @@
         "static bank",
         "acct manager",
         "account manager"
-      ],
-      "fuzzy": true
+      ]
     },
     "summary": {
       "patterns": [
@@ -898,8 +875,7 @@
         "overview",
         "breakdown",
         "stats"
-      ],
-      "fuzzy": true
+      ]
     },
     "tid": {
       "patterns": [
@@ -917,8 +893,7 @@
         "tids",
         "terminal id",
         "terminal ids"
-      ],
-      "fuzzy": true
+      ]
     },
     "top": {
       "patterns": [
@@ -961,8 +936,7 @@
         "per state",
         "by state",
         "ranking"
-      ],
-      "fuzzy": true
+      ]
     },
     "verify": {
       "patterns": [
@@ -1004,22 +978,7 @@
         "in the registry",
         "registered",
         "valid"
-      ],
-      "fuzzy": true
+      ]
     }
-  },
-  "slang": {
-    "acct": "account",
-    "accts": "accounts",
-    "mgr": "manager",
-    "deets": "details",
-    "stmnt": "statement",
-    "stmt": "statement",
-    "numb": "number",
-    "benef": "beneficiary",
-    "addr": "address",
-    "mob": "mobile",
-    "tel": "telephone"
-  },
-  "semantic_tier_mode": "shadow"
+  }
 }
