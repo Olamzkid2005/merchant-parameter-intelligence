@@ -226,6 +226,12 @@ export const api = {
     if (!res.ok) throw new Error('Failed to load ingestion ledger')
     return res.json()
   },
+  ingestWatch: async () => {
+    const res = await fetch(`${BASE}/ingest/watch`)
+    if (!res.ok) throw new Error('Failed to load ingestion watch status')
+    return res.json()
+  },
+  ingestWatchTrigger: () => post('/ingest/watch/trigger', {}),
   applySuggestion: (ngram, intent, weight) =>
     post('/feedback/suggestions/apply', { ngram, intent, weight }),
   rejectSuggestion: (ngram, intent) =>

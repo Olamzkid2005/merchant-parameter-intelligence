@@ -125,6 +125,34 @@ def get_profiler():
     return _profiler
 
 
+def reset_shared_singletons():
+    """Close every cached singleton's DB connection and drop the cache.
+
+    Used by the ingestion watcher (merchant_intelligence/watcher.py) right
+    before a rebuild: the scripts must DELETE the database files, which on
+    Windows fails while a connection is open. After the rebuild the watcher
+    calls this again is unnecessary — the next request lazily recreates each
+    singleton against the fresh database via the get_* accessors.
+    """
+    global _searcher, _resolver, _profiler
+    for obj in (_profiler, _resolver, _searcher):
+        if obj is None:
+            continue
+        for attr in ("db", "resolver", "matcher"):
+            try:
+                sub = getattr(obj, attr, None)
+                # resolver/matcher share the owner's DatabaseManager; closing
+                # the same manager twice is harmless (close() is idempotent
+                # enough via the None check), so just close each .db we see.
+                if sub is not None and hasattr(sub, "close") and attr == "db":
+                    sub.close()
+            except Exception:  # noqa: BLE001 — best-effort unlock
+                pass
+    _searcher = None
+    _resolver = None
+    _profiler = None
+
+
 def _key_merchants_for(name: str) -> list:
     """Key-merchant roots a merchant name belongs to ([] if none).
 

@@ -74,11 +74,27 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _norm_key(p: Path) -> str:
+    """Canonical ledger key for a path.
+
+    os.path.normcase makes the key case-insensitive on Windows (and is a
+    no-op elsewhere) — critical because the same file is snapshotted through
+    two different path spellings: scripts/build_intelligence_db.folder_snapshot()
+    uses Path.resolve() (canonical on-disk casing, e.g. .../Downloads/...)
+    while _folder_snapshot() below walks from config.DATA_DIR, which inherits
+    whatever casing the app was LAUNCHED with (run.bat vs a lowercase shell
+    cd). Without normcase every key mismatches and freshness reports all
+    sources as permanently "new". Backslashes are normalized to forward
+    slashes so keys are stable text across runs.
+    """
+    return os.path.normcase(str(p)).replace("\\", "/")
+
+
 def _snapshot_of(snapshot: Dict[Path, Any]) -> str:
     """Serialize a {path: (mtime_ns, size)} snapshot for storage.
 
-    Keys are normalized to POSIX strings so the same file is comparable
-    across runs (Windows backslashes are not stable text).
+    Keys are normalized (see _norm_key) so the same file is comparable
+    across runs regardless of launch-path casing.
     """
     out: Dict[str, Any] = {}
     for p, meta in snapshot.items():
@@ -86,7 +102,7 @@ def _snapshot_of(snapshot: Dict[Path, Any]) -> str:
             mtime, size = meta[0], meta[1]
         except (TypeError, IndexError):
             mtime, size = 0, 0
-        out[str(p).replace("\\", "/")] = {"mtime_ns": int(mtime), "size": int(size)}
+        out[_norm_key(p)] = {"mtime_ns": int(mtime), "size": int(size)}
     return json.dumps(out, sort_keys=True)
 
 
@@ -94,7 +110,7 @@ def _snapshot_of_file(path: Path) -> Dict[str, Any]:
     """Take the (mtime_ns, size) snapshot of a single Excel file."""
     try:
         st = path.stat()
-        return {str(path).replace("\\", "/"): {"mtime_ns": st.st_mtime_ns, "size": st.st_size}}
+        return {_norm_key(path): {"mtime_ns": st.st_mtime_ns, "size": st.st_size}}
     except OSError:
         return {}
 
@@ -178,6 +194,17 @@ def _db_row_count() -> int:
         return 0
 
 
+# Derived/export files the app itself wrote into data/ ("Export to Excel"
+# downloads). scripts/build_intelligence_db.py EXCLUDED_EXPORTS skips them
+# at ingestion AND in its own snapshot — this scan must skip them too, or
+# they read as permanently "new" and a watch-mode consumer would rebuild in
+# an endless loop. Keep in sync with the script's set.
+EXCLUDED_EXPORTS = {
+    "medplus_tids.xlsx",
+    "medplus_mids.xlsx",
+}
+
+
 def _folder_snapshot(folder: Path) -> Dict[Path, Any]:
     """Inline snapshot of every Excel file's (mtime_ns, size) in a folder.
 
@@ -192,12 +219,21 @@ def _folder_snapshot(folder: Path) -> Dict[Path, Any]:
         for p in folder.rglob(f"*{ext}"):
             if p.name.startswith("~$"):
                 continue
+            if p.name.lower() in EXCLUDED_EXPORTS:
+                continue
             try:
                 st = p.stat()
                 snap[p] = (st.st_mtime_ns, st.st_size)
             except OSError:
                 continue
     return snap
+
+
+def _norm_baseline(baseline: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize stored snapshot keys so old ledger entries (recorded before
+    _norm_key existed, with launch-path-dependent casing) still compare."""
+    return {k.replace("\\", "/").lower() if os.name == "nt"
+            else k.replace("\\", "/"): v for k, v in baseline.items()}
 
 
 def freshness(folder: Optional[Path] = None) -> Dict[str, Any]:
@@ -233,9 +269,9 @@ def freshness(folder: Optional[Path] = None) -> Dict[str, Any]:
     stale: List[Dict[str, Any]] = []
     if folder.exists():
         current = _folder_snapshot(folder)
-        baseline = (last_ok or {}).get("sources", {})
+        baseline = _norm_baseline((last_ok or {}).get("sources", {}))
         for path, meta in sorted(current.items()):
-            key = str(path).replace("\\", "/")
+            key = _norm_key(path)
             rec = {"name": key, "mtime_ns": meta[0], "size": meta[1]}
             if key not in baseline:
                 rec["status"] = "new"

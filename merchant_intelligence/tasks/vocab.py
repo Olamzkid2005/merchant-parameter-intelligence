@@ -281,6 +281,12 @@ _DEFAULT_INTENT_PATTERNS: Dict[str, List[Tuple[str, int]]] = {
 
 
 
+
+
+
+
+
+
 # ── Config loading (intents.json, tunable without code) ───────────────────
 # The live INTENT_PATTERNS / INTENT_KEYWORDS come from the JSON file next to
 # this module (or the MERCHANT_INTENTS_CONFIG env var). Whole lines starting

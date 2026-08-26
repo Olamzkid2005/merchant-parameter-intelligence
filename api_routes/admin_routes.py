@@ -589,3 +589,35 @@ def ingestion_scan_endpoint():
     from merchant_intelligence.ingestion import run_incremental_scan
     _audit("ingestion_scan")
     return run_incremental_scan()
+
+
+# ── Ingestion watch mode (roadmap #2 — auto-rebuild on source drift) ──
+
+@router.get("/ingest/watch")
+def ingest_watch_status():
+    """Watch-mode status + current freshness signal.
+
+    The watcher polls data/ for new/changed Excel workbooks and rebuilds all
+    three databases automatically (closing/reopening the API's cached DB
+    connections around the rebuild). Disable with INGEST_WATCH=0.
+    """
+    from merchant_intelligence.watcher import get_watcher
+    from merchant_intelligence import ingest_ledger
+    w = get_watcher()
+    return {
+        "ok": True,
+        "watch": w.status(),
+        "freshness": ingest_ledger.freshness(),
+    }
+
+
+@router.post("/ingest/watch/trigger")
+def ingest_watch_trigger():
+    """Queue an immediate scan+rebuild on the watcher's next loop tick.
+
+    The rebuild runs in the watcher thread (search is unavailable for its
+    duration); poll GET /api/ingest/watch for progress.
+    """
+    from merchant_intelligence.watcher import get_watcher
+    _audit("ingest_watch_trigger")
+    return get_watcher().trigger("api")

@@ -22,14 +22,39 @@ function fmtBytes(n) {
 
 export default function IngestionLedgerCard() {
   const [data, setData] = useState(null)
+  const [watch, setWatch] = useState(null)
+  const [triggering, setTriggering] = useState(false)
   const [err, setErr] = useState(null)
 
   async function load() {
     setErr(null)
     try {
-      setData(await api.ingest(15))
+      const [d, w] = await Promise.all([api.ingest(15), api.ingestWatch()])
+      setData(d)
+      setWatch(w?.watch || null)
     } catch (e) {
       setErr(String(e.message || e))
+    }
+  }
+
+  async function triggerRebuild() {
+    setTriggering(true)
+    setErr(null)
+    try {
+      await api.ingestWatchTrigger()
+      // The watcher flips to 'rebuilding' on its next tick — poll until it
+      // settles back so the user sees live progress.
+      for (let i = 0; i < 120; i++) {
+        await new Promise((r) => setTimeout(r, 5000))
+        const w = await api.ingestWatch()
+        setWatch(w?.watch || null)
+        if ((w?.watch?.state || '') !== 'rebuilding') break
+      }
+      await load()
+    } catch (e) {
+      setErr(String(e.message || e))
+    } finally {
+      setTriggering(false)
     }
   }
 
@@ -37,11 +62,31 @@ export default function IngestionLedgerCard() {
     load()
   }, [])
 
+  // Live-refresh while the watcher is rebuilding.
+  useEffect(() => {
+    if ((watch?.state || '') !== 'rebuilding') return undefined
+    const t = setInterval(() => {
+      api.ingestWatch().then((w) => setWatch(w?.watch || null)).catch(() => {})
+    }, 5000)
+    return () => clearInterval(t)
+  }, [watch?.state])
+
   const runs = data?.runs || []
   const stats = data?.stats || {}
   const fresh = data?.freshness || {}
   const stale = fresh.stale_sources || []
   const lastRun = fresh.last_ok_run
+  const watchState = watch?.state || 'unknown'
+  const watchEnabled = watch?.enabled !== false
+  const lastRebuild = watch?.last_rebuild
+
+  const watchBadge = !watchEnabled
+    ? { cls: 'bg-surface-container-high text-on-surface-variant', icon: 'pause_circle', label: 'watch off' }
+    : watchState === 'rebuilding'
+      ? { cls: 'bg-blue-100 text-blue-800', icon: 'progress_activity', label: 'rebuilding…' }
+      : watchState === 'error'
+        ? { cls: 'bg-error-container/60 text-error', icon: 'error', label: 'rebuild failed' }
+        : { cls: 'bg-green-100 text-green-800', icon: 'radar', label: 'watching' }
 
   return (
     <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
@@ -50,9 +95,20 @@ export default function IngestionLedgerCard() {
           <span className="msi text-[18px] text-primary">database</span>
           Data freshness &amp; ingestion ledger
         </h3>
-        <span className="font-plex text-[10px] font-bold uppercase tracking-wider text-outline">
-          roadmap item #2 · append-only
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`flex items-center gap-1 rounded-full px-3 py-1 font-plex text-[11px] font-bold ${watchBadge.cls}`}>
+            <span className="msi text-[14px]">{watchBadge.icon}</span>
+            {watchBadge.label}
+          </span>
+          <button
+            onClick={triggerRebuild}
+            disabled={triggering || watchState === 'rebuilding'}
+            className="flex items-center gap-1.5 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 font-plex text-[11px] font-bold text-on-surface-variant transition-all hover:border-primary hover:text-primary active:scale-95 disabled:opacity-40"
+          >
+            <span className="msi text-[14px]">{triggering ? 'hourglass_top' : 'build'}</span>
+            {triggering || watchState === 'rebuilding' ? 'Rebuilding…' : 'Scan & rebuild now'}
+          </button>
+        </div>
       </div>
 
       <div className="space-y-4 px-5 py-4">
@@ -60,6 +116,27 @@ export default function IngestionLedgerCard() {
           <p className="rounded-lg bg-error-container/40 px-4 py-2 font-plex text-[12px] font-bold text-error">
             {err}
           </p>
+        )}
+
+        {/* Watch-mode banner */}
+        {watch && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-surface-container-low px-4 py-2.5 font-plex text-[11px] text-on-surface-variant">
+            <span className="font-bold text-on-surface">Auto-ingestion watch</span>
+            <span>
+              polls every {watch.interval_secs}s · settle {watch.settle_secs}s · cooldown {Math.round(watch.cooldown_secs / 60)}min
+            </span>
+            {watch.last_check_at && <span>last check {fmtTime(watch.last_check_at)}</span>}
+            {lastRebuild && (
+              <span>
+                last auto-rebuild <b className={lastRebuild.ok ? 'text-green-700' : 'text-error'}>
+                  {lastRebuild.ok ? 'ok' : 'failed'}
+                </b> {fmtTime(lastRebuild.finished_at)}
+                {Array.isArray(lastRebuild.sources) && lastRebuild.sources.length > 0 &&
+                  ` · ${lastRebuild.sources.length} source(s)`}
+              </span>
+            )}
+            {watch.last_error && <span className="text-error">{watch.last_error}</span>}
+          </div>
         )}
 
         {/* Freshness banner */}
@@ -73,7 +150,9 @@ export default function IngestionLedgerCard() {
             <p className={`font-plex text-[12px] font-bold ${stale.length === 0 ? 'text-green-900' : 'text-amber-900'}`}>
               {stale.length === 0
                 ? 'All Excel sources are current — the database matches every file in data/.'
-                : `${stale.length} source file${stale.length === 1 ? ' is' : 's are'} newer than the last rebuild — run a rebuild to pick them up.`}
+                : watchEnabled
+                  ? `${stale.length} source file${stale.length === 1 ? ' is' : 's are'} newer than the last rebuild — the watcher will auto-rebuild once the file${stale.length === 1 ? ' is' : 's are'} settled.`
+                  : `${stale.length} source file${stale.length === 1 ? ' is' : 's are'} newer than the last rebuild — run a rebuild to pick them up.`}
             </p>
             <p className="font-plex text-[11px] text-on-surface-variant">
               Last good build: <b>{fmtTime(lastRun?.finished_at)}</b>

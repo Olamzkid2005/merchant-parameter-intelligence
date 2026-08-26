@@ -60,7 +60,8 @@ jobs:
             test_engine_upgrades.py \
             test_engine_v2.py \
             test_open_flag.py \
-            test_watch_mode.py ; do
+            test_watch_mode.py \
+            test_watcher.py ; do
             echo "=== $t ==="
             .venv/Scripts/python.exe -X utf-8 tests/$t
           done

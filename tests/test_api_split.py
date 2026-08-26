@@ -87,6 +87,8 @@ check("pre-split unique paths == 55", len(old_paths) == 55, repr(len(old_paths))
 # one bumps the 55-path baseline below and is excluded from the added-check.
 DELIBERATE_ADDITIONS = {
     "/api/copilot",
+    "/api/ingest/watch",
+    "/api/ingest/watch/trigger",
     "/api/assets/history",
     "/api/assets/pending",
     "/api/assets/{asset_type}/{asset_id}/apply",

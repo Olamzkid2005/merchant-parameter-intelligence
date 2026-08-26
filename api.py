@@ -27,6 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import json  # noqa: E402  (after sys.path setup)
+import os  # noqa: E402
 
 from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
@@ -194,6 +195,22 @@ from api_routes.auth_routes import (  # noqa: E402,F401
     auth_add_user, auth_config, auth_login, auth_logout, auth_me,
     auth_remove_user, auth_reset_password, auth_save_config,
 )
+
+
+# ── incremental ingestion watch mode (roadmap #2) ────────────────────────
+# A daemon thread polls data/ for new/changed Excel workbooks and
+# auto-rebuilds the three databases when sources drift (closing/reopening
+# the cached DB connections around the rebuild). Opt out with INGEST_WATCH=0.
+# Skipped under pytest so the test suite never fires a real rebuild.
+@app.on_event("startup")
+def _start_ingest_watcher():
+    import sys as _sys
+    if "pytest" in _sys.modules:
+        return
+    if os.environ.get("INGEST_WATCH", "1") == "0":
+        return
+    from merchant_intelligence.watcher import get_watcher
+    get_watcher().start()
 
 
 if __name__ == "__main__":
