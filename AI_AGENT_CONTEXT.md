@@ -240,6 +240,41 @@ Hard-won gotchas (do not regress):
   so an interrupted build leaves an empty `intelligence.db` (self-heals: the
   watcher sees stale/empty and rebuilds on its next cycle).
 
+### Schema versioning + migrations (`merchant_intelligence/migrations.py`)
+
+Shipped 2026-08-26 (roadmap #2). Version tracking = SQLite's native
+`PRAGMA user_version` (in the DB file header — no extra table). An ordered,
+append-only `MIGRATIONS` registry; `apply_migrations()` applies every version
+> the DB's current one, stamps after each succeeds, never downgrades a newer
+DB, and reports (never creates) a missing file.
+
+- **v1** baseline marker; **v2** the data-platform tables (`source_files`,
+  `identifiers`, `entity_clusters`, `data_quality_log` — mirrors schema.py's
+  DDL for those four). Auth/encryption tables (app_users/roles, encryption_keys)
+  deliberately stay behind the explicit `POST /api/schema/migrate` endpoint —
+  auto-seeding a default admin on every boot would be a security smell.
+- **Re-applied after EVERY rebuild** — rebuilds DELETE the DBs, so the
+  pipeline (app.start step 5 AND the watcher's `REBUILD_STEPS`) ends with
+  `python -m merchant_intelligence.migrations`; also best-effort at API
+  startup. To add a schema change: append `(3, "...", DDL)` to `MIGRATIONS` —
+  never edit an applied migration.
+- `GET /api/ingest/watch` now returns `schema_versions` per DB (chip on the
+  Audit Trail card). `POST /api/ingestion/scan` works again (its
+  `source_files` table exists).
+- Tests: `tests/test_migrations.py` (21 hermetic checks: upgrade, idempotency,
+  partial upgrade, failure isolation, newer-DB guard, apply_all, shipped
+  registry). In CI.
+
+**Test-suite hygiene gotcha (cost us hours):** `tests/test_feedback.py`
+used to apply patterns with `r'\\b...'` (DOUBLE backslash = literal
+backslashes, not a word boundary) and without the `MERCHANT_INTENTS_VOCAB`
+seam — so `apply_pattern`'s lockstep `regenerate_vocab_defaults()` wrote the
+double-escaped pattern into the REAL vocab.py on every suite run. Both seams
+(`MERCHANT_INTENTS_CONFIG` AND `MERCHANT_INTENTS_VOCAB`) are mandatory in any
+test that calls apply_pattern/regenerate. Symptom if regressed:
+`test_enrichment`'s "shipped config == shipped defaults" check fails and
+static_account confidence drops.
+
 ---
 
 ## 5. THE INTENT PARSER (`merchant_intelligence/tasks/`)
@@ -435,6 +470,7 @@ python tests/test_shadow_review.py    # Tier-2 §7 spot-check tooling + Phase-3 
 python tests/test_audit.py            # append-only audit trail (roadmap #1 slice; hermetic: temp MERCHANT_AUDIT_DB; 18 checks)
 python tests/test_auth.py             # opt-in authN/Z + RBAC + field masking (roadmap #1 slice; hermetic: temp config + sessions; 27 checks)
 python tests/test_ingest_ledger.py    # ingestion-run ledger + freshness signal (roadmap #2 slice; hermetic: temp INGEST_LEDGER_FILE + temp source folder; 25 checks)
+python tests/test_migrations.py       # schema versioning + ordered migrations via PRAGMA user_version (roadmap #2; hermetic temp DBs; 21 checks)
 python tests/test_watcher.py          # incremental ingestion watch mode (roadmap #2; hermetic: fake ledger patched on the package attr, fake scripts, no subprocesses; 30 checks)
 python tests/test_api_split.py        # api.py router-split parity + /api/v1 mirror (roadmap #3 slices; hermetic: 55-path baseline vs the last pre-split commit + deliberate-additions allowlist + legacy re-exports; 19 checks)
 python tests/test_copilot.py          # Merchant Copilot (roadmap #4 slice; hermetic decompose + LIVE /api/copilot execution incl. the chained "find MEDPLUS then the static account for those" case; 38 checks)

@@ -144,7 +144,7 @@ _cfg_path = tempfile.mkstemp(suffix='.json')[1]
 _minimal = {
     'intents': {
         'static_account': {
-            'patterns': [{'pattern': r'\\bstatic account\\b', 'weight': 8}],
+            'patterns': [{'pattern': r'\bstatic account\b', 'weight': 8}],
             'keywords': ['static account', 'beneficiary'],
         }
     }
@@ -152,6 +152,15 @@ _minimal = {
 with open(_cfg_path, 'w', encoding='utf-8') as _fh:
     json.dump(_minimal, _fh, indent=2)
 os.environ['MERCHANT_INTENTS_CONFIG'] = _cfg_path
+
+# Lockstep regeneration must hit a TEMP COPY of vocab.py, never the real
+# file (same seam test_enrichment.py uses). Without this, apply_pattern's
+# regenerate_vocab_defaults() rewrites the REAL vocab.py — and if the temp
+# config above ever carries a mis-escaped pattern, the regression ships.
+import shutil as _shutil
+_vocab_copy = tempfile.mkstemp(suffix='.py')[1]
+_shutil.copy(vocab.__file__, _vocab_copy)
+os.environ['MERCHANT_INTENTS_VOCAB'] = _vocab_copy
 
 # Force reload so the engine reads from the temp file
 vocab.reload_intents()
@@ -182,6 +191,13 @@ check('re-apply does not duplicate pattern',
 
 # Clean up
 del os.environ['MERCHANT_INTENTS_CONFIG']
+del os.environ['MERCHANT_INTENTS_VOCAB']
+# Best-effort only: Windows keeps the temp copy locked while the imported
+# module is alive, so removal can fail — tempfile garbage is fine.
+try:
+    os.remove(_vocab_copy)
+except OSError:
+    pass
 vocab.reload_intents()
 
 # ── 7. Outcome stats ──────────────────────────────────────────────────────

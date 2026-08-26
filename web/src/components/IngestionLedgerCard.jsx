@@ -23,6 +23,7 @@ function fmtBytes(n) {
 export default function IngestionLedgerCard() {
   const [data, setData] = useState(null)
   const [watch, setWatch] = useState(null)
+  const [schemaVersions, setSchemaVersions] = useState({})
   const [triggering, setTriggering] = useState(false)
   const [err, setErr] = useState(null)
 
@@ -32,6 +33,7 @@ export default function IngestionLedgerCard() {
       const [d, w] = await Promise.all([api.ingest(15), api.ingestWatch()])
       setData(d)
       setWatch(w?.watch || null)
+      setSchemaVersions(w?.schema_versions || {})
     } catch (e) {
       setErr(String(e.message || e))
     }
@@ -79,6 +81,10 @@ export default function IngestionLedgerCard() {
   const watchState = watch?.state || 'unknown'
   const watchEnabled = watch?.enabled !== false
   const lastRebuild = watch?.last_rebuild
+  const schemaVersionsMap = schemaVersions || {}
+  const schemaLabel = Object.values(schemaVersionsMap).every((v) => v == null)
+    ? ''
+    : `schema v${Object.values(schemaVersionsMap).find((v) => v != null) ?? '?'}`
 
   const watchBadge = !watchEnabled
     ? { cls: 'bg-surface-container-high text-on-surface-variant', icon: 'pause_circle', label: 'watch off' }
@@ -96,6 +102,11 @@ export default function IngestionLedgerCard() {
           Data freshness &amp; ingestion ledger
         </h3>
         <div className="flex items-center gap-2">
+          {schemaLabel && (
+            <span className="rounded-full bg-surface-container-high px-3 py-1 font-plex text-[11px] font-bold text-on-surface-variant">
+              {schemaLabel}
+            </span>
+          )}
           <span className={`flex items-center gap-1 rounded-full px-3 py-1 font-plex text-[11px] font-bold ${watchBadge.cls}`}>
             <span className="msi text-[14px]">{watchBadge.icon}</span>
             {watchBadge.label}

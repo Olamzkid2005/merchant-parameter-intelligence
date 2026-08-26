@@ -168,7 +168,7 @@ script_calls = []
 
 
 def fake_run_script(self, script, log):
-    script_calls.append(script[0])
+    script_calls.append(" ".join(script))
     # rebuild_db.py fails -> pipeline aborts before the other scripts
     return 1 if "rebuild_db" in script[0] else 0
 
@@ -205,7 +205,7 @@ script_calls.clear()
 
 
 def fake_run_ok(self, script, log):
-    script_calls.append(script[0])
+    script_calls.append(" ".join(script))
     return 1 if "self_improve" in script[0] else 0  # harness fails
 
 
@@ -216,10 +216,11 @@ finally:
     IngestWatcher._run_script = wmod.IngestWatcher._run_script
 wmod._PROJECT_ROOT = saved_root
 
-check("success path runs all 3 scripts + harness",
+check("success path runs all 3 scripts + migrations + harness",
       script_calls == ["scripts/rebuild_db.py",
                        "scripts/build_intelligence_db.py",
                        "scripts/sync_intel_db.py",
+                       "-m merchant_intelligence.migrations",
                        "scripts/self_improve.py"], str(script_calls))
 check("harness failure is non-fatal (rebuild ok)",
       w2.last_rebuild and w2.last_rebuild["ok"] is True

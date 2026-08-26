@@ -69,6 +69,10 @@ REBUILD_STEPS = [
     ("merchant_search.db", ["scripts/rebuild_db.py"]),
     ("intelligence.db", ["scripts/build_intelligence_db.py"]),
     ("merchant_intel.db", ["scripts/sync_intel_db.py"]),
+    # A rebuild DELETES the DBs — re-apply the versioned schema migrations
+    # afterwards or every non-build-script table is silently lost
+    # (merchant_intelligence/migrations.py, roadmap #2).
+    ("schema migrations", ["-m", "merchant_intelligence.migrations"]),
 ]
 HARNESS_STEP = ("self-improve harness", ["scripts/self_improve.py"])
 

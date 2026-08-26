@@ -126,7 +126,18 @@ remembered to rebuild."
 > every source read as permanently "new", and app-generated export workbooks
 > (`EXCLUDED_EXPORTS`) are skipped by the freshness scan so they can never
 > trigger a rebuild loop. `tests/test_watcher.py` (30 checks, hermetic).
-> Remaining roadmap: schema versioning + migrations, source lineage.
+> **Schema versioning + migrations shipped:** `merchant_intelligence/migrations.py`
+> — native `PRAGMA user_version` tracking + an ordered, append-only migration
+> registry (v1 baseline, v2 data-platform tables: source_files / identifiers /
+> entity_clusters / data_quality_log). Re-applied after every rebuild (both the
+> app.start pipeline and the watcher's steps end with it) and best-effort at API
+> startup, so rebuilds can no longer silently drop non-build-script tables.
+> Auth/tenancy + encryption tables stay behind the explicit /api/schema/migrate
+> endpoint by design. `GET /api/ingest/watch` reports per-DB schema versions.
+> `tests/test_migrations.py` (21 hermetic checks) in CI. Also fixed the
+> recurring vocab.py double-escape regression at its root: test_feedback.py was
+> writing a mis-escaped pattern and regenerating the REAL vocab.py — both
+> config seams are now enforced. Remaining roadmap: source lineage.
 
 **Why it matters:** The Excel → rebuild flow is the operational bottleneck and
 the source of every data-quality bug (the README itself warns "check the

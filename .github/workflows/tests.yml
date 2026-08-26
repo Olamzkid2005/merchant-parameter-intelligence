@@ -56,6 +56,7 @@ jobs:
             test_intent_golden.py \
             test_feedback.py \
             test_ingest_ledger.py \
+            test_migrations.py \
             test_api_split.py \
             test_engine_upgrades.py \
             test_engine_v2.py \

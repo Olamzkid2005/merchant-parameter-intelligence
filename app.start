@@ -96,6 +96,12 @@ def rebuild_databases():
     # alias suggestions dropped into the pending review queue automatically.
     steps.append(("self-improve harness (alias-free gate)",
                   [str(VENV_PY), "scripts/self_improve.py"]))
+    # Schema versioning (roadmap #2): a rebuild DELETES the databases, so
+    # the versioned migrations (merchant_intelligence/migrations.py) must
+    # re-apply afterwards or every non-build-script table is silently lost
+    # (source_files, identifiers, entity_clusters, data_quality_log).
+    steps.append(("schema migrations (PRAGMA user_version)",
+                  [str(VENV_PY), "-m", "merchant_intelligence.migrations"]))
     if not VENV_PY.exists():
         print(f"  [X] venv missing at {VENV_PY}\n"
               f"      Create it first:\n"

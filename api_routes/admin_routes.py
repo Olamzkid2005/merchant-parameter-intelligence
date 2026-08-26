@@ -603,11 +603,13 @@ def ingest_watch_status():
     """
     from merchant_intelligence.watcher import get_watcher
     from merchant_intelligence import ingest_ledger
+    from merchant_intelligence.migrations import versions as schema_versions
     w = get_watcher()
     return {
         "ok": True,
         "watch": w.status(),
         "freshness": ingest_ledger.freshness(),
+        "schema_versions": schema_versions(),
     }
 
 

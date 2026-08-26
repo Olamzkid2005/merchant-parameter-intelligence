@@ -207,6 +207,14 @@ def _start_ingest_watcher():
     import sys as _sys
     if "pytest" in _sys.modules:
         return
+    # Schema versioning (roadmap #2): converge the DB schema on boot so a
+    # database built by an older tool gets migrated without a rebuild.
+    # Best-effort — a missing/locked DB must not block startup.
+    try:
+        from merchant_intelligence.migrations import apply_all
+        apply_all()
+    except Exception:  # noqa: BLE001
+        pass
     if os.environ.get("INGEST_WATCH", "1") == "0":
         return
     from merchant_intelligence.watcher import get_watcher
