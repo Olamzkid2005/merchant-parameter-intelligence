@@ -187,7 +187,58 @@ python app.start rebuild
 3. `scripts/sync_intel_db.py` — re-sync `merchant_intel.db`
 4. `scripts/self_improve.py` — recall-baseline gate + mine alias candidates
 
-To add new data: drop the workbook into `data/`, run `python app.start rebuild`.
+To add new data: drop the workbook into `data/` — **the watch mode picks it up
+automatically** (below). `python app.start rebuild` is the manual fallback.
+
+### Incremental ingestion WATCH MODE (`merchant_intelligence/watcher.py`)
+
+Shipped 2026-08-26 (roadmap #2). A daemon thread started by the API process
+(`@app.on_event("startup")` in `api.py`, skipped under pytest, disabled with
+`INGEST_WATCH=0`) that makes "drop a workbook in `data/`" the whole workflow:
+
+1. **Poll** — every `INGEST_WATCH_INTERVAL`s (30) calls
+   `ingest_ledger.freshness()`, which compares each Excel file's
+   `(mtime_ns, size)` against the last good build's ledger snapshot (cheap —
+   no hashing of ~100 MB workbooks).
+2. **Debounce** — every stale file must be SETTLED (mtime ≥
+   `INGEST_WATCH_SETTLE`s (20) old), so a workbook mid-save never enters a
+   build.
+3. **Cooldown** — no rebuild within `INGEST_WATCH_COOLDOWN`s (600) of the
+   last one, so dropping several workbooks one-by-one doesn't storm.
+4. **Rebuild** — closes the API's cached DB connections
+   (`api_shared.reset_shared_singletons()` — required because the scripts
+   DELETE the `.db` files, impossible on Windows while a connection is open;
+   this is WHY the watcher lives inside the API process), then runs the same
+   3-script pipeline as `app.start rebuild` as subprocesses
+   (`sys.executable`, cwd = project root, output appended to
+   `data/watch_rebuild.log`, 30-min timeout per script), then Nones the
+   singletons so the next request lazily reconnects to the fresh DBs. Search
+   is unavailable for the ~5–8 min rebuild; state is visible live.
+5. **Harness non-fatal** — `self_improve.py` runs after the data scripts but
+   its regression gate does NOT fail the rebuild (that would loop the
+   watcher); it's reported as `harness_ok` in the status.
+
+Endpoints: `GET /api/ingest/watch` (status + freshness),
+`POST /api/ingest/watch/trigger` (queue an immediate rebuild). UI: watch
+badge + "Scan & rebuild now" button on the Audit Trail page's ingestion
+ledger card. Tests: `tests/test_watcher.py` (30 hermetic checks; the fake
+ledger is patched on the `merchant_intelligence` PACKAGE attribute because
+`_poll_once` does `from . import ingest_ledger`).
+
+Hard-won gotchas (do not regress):
+- **Ledger keys are case-normalized** (`os.path.normcase`):
+  `build_intelligence_db.folder_snapshot()` snapshots `Path.resolve()`d paths
+  (canonical casing, `.../Downloads/...`) while the freshness scan walks from
+  `config.DATA_DIR` (inherits launch casing — run.bat vs a lowercase shell
+  cd). Without normcase EVERY source reads as permanently "new".
+- **`EXCLUDED_EXPORTS` must stay in sync** between the build script and
+  `ingest_ledger.py`'s freshness scan: app-generated export workbooks
+  (`medplus_tids.xlsx`, `medplus_mids.xlsx`) are deliberately never ingested;
+  if the freshness scan doesn't skip them too, they read as "new" forever and
+  the watcher rebuilds in an endless loop every cooldown.
+- **Never force-kill the API mid-rebuild** — the build deletes the DB first,
+  so an interrupted build leaves an empty `intelligence.db` (self-heals: the
+  watcher sees stale/empty and rebuilds on its next cycle).
 
 ---
 
@@ -302,7 +353,11 @@ during `app.start` preflight).
 `/api/feedback/suggestions` + apply/reject, `GET /api/idclass/debug`,
 `/api/selfimprove`, `POST /api/brief`, `POST /api/copilot` (roadmap #4:
 compound-request decompose + execute, `{text, use_llm}` → plan + steps +
-provenance; served on both `/api` and `/api/v1`).
+provenance; served on both `/api` and `/api/v1`), `GET /api/ingest`
+(ledger runs/stats/freshness), `GET /api/ingest/watch` +
+`POST /api/ingest/watch/trigger` (watch mode, roadmap #2),
+`POST /api/ingestion/scan` (metadata-only CDC stub — does NOT rebuild;
+the watcher is the real incremental path).
 
 ---
 
@@ -380,6 +435,7 @@ python tests/test_shadow_review.py    # Tier-2 §7 spot-check tooling + Phase-3 
 python tests/test_audit.py            # append-only audit trail (roadmap #1 slice; hermetic: temp MERCHANT_AUDIT_DB; 18 checks)
 python tests/test_auth.py             # opt-in authN/Z + RBAC + field masking (roadmap #1 slice; hermetic: temp config + sessions; 27 checks)
 python tests/test_ingest_ledger.py    # ingestion-run ledger + freshness signal (roadmap #2 slice; hermetic: temp INGEST_LEDGER_FILE + temp source folder; 25 checks)
+python tests/test_watcher.py          # incremental ingestion watch mode (roadmap #2; hermetic: fake ledger patched on the package attr, fake scripts, no subprocesses; 30 checks)
 python tests/test_api_split.py        # api.py router-split parity + /api/v1 mirror (roadmap #3 slices; hermetic: 55-path baseline vs the last pre-split commit + deliberate-additions allowlist + legacy re-exports; 19 checks)
 python tests/test_copilot.py          # Merchant Copilot (roadmap #4 slice; hermetic decompose + LIVE /api/copilot execution incl. the chained "find MEDPLUS then the static account for those" case; 38 checks)
 python tests/test_app_start.py        # launcher pre-flight
@@ -466,6 +522,10 @@ column check) — a rebuild that regresses any of these fails loudly.
 
 ## 12. OUTSTANDING WORK (candidates, not committed plans)
 
+- **Incremental ingestion watch mode is DONE** (roadmap #2) —
+  `merchant_intelligence/watcher.py` auto-rebuilds all three DBs when Excel
+  sources drift; see §4 for the architecture and its gotchas. Remaining from
+  #2: schema versioning + migrations, source lineage.
 - **`api.py` router split is DONE** (roadmap #3 slices 1–2) — handlers live in
   `api_routes/` (`auth_routes`, `profile_routes`, `search_routes`,
   `tasks_routes`, `admin_routes`) over `api_shared.py` (helpers, models,
