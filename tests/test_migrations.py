@@ -72,7 +72,7 @@ print("== 1. fresh DB upgrade ==")
 db = make_db()
 r = m.apply_migrations(db)
 check("upgrade ok", r["ok"] is True, str(r))
-check("all migrations applied", r["applied"] == [1, 2], str(r["applied"]))
+check("all migrations applied", r["applied"] == [1, 2, 3], str(r["applied"]))
 check("version stamped to latest", version_of(db) == m.LATEST_VERSION)
 check("source_files table exists",
       _t := sqlite3.connect(str(db)).execute(
@@ -97,8 +97,8 @@ conn.execute("PRAGMA user_version = 1")
 conn.commit()
 conn.close()
 r = m.apply_migrations(db2)
-check("v1-stamped DB receives only v2",
-      r["applied"] == [2] and version_of(db2) == 2, str(r))
+check("v1-stamped DB receives v2 and v3",
+      r["applied"] == [2, 3] and version_of(db2) == 3, str(r))
 
 # ── 4. failure isolation ─────────────────────────────────────────────────
 print("== 4. failure isolation ==")

@@ -27,13 +27,18 @@ export default function IngestionLedgerCard() {
   const [triggering, setTriggering] = useState(false)
   const [err, setErr] = useState(null)
 
+  const [lineage, setLineage] = useState(null)
+
   async function load() {
     setErr(null)
     try {
-      const [d, w] = await Promise.all([api.ingest(15), api.ingestWatch()])
+      const [d, w, lin] = await Promise.all([
+        api.ingest(15), api.ingestWatch(), api.lineage().catch(() => null),
+      ])
       setData(d)
       setWatch(w?.watch || null)
       setSchemaVersions(w?.schema_versions || {})
+      setLineage(lin)
     } catch (e) {
       setErr(String(e.message || e))
     }
@@ -200,6 +205,44 @@ export default function IngestionLedgerCard() {
                   </span>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Source lineage (file -> sheet -> rows -> merchants) */}
+        {lineage?.ok && lineage.files?.length > 0 && (
+          <div>
+            <p className="mb-1.5 font-plex text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Source lineage — every row traceable to its workbook
+              <span className="ml-2 font-normal normal-case text-outline">
+                {lineage.traced_merchants?.toLocaleString()} / {lineage.total_merchants?.toLocaleString()} rows traced
+              </span>
+            </p>
+            <div className="max-h-56 overflow-auto rounded-md border border-outline-variant">
+              <table className="w-full text-left font-mono text-[11px]">
+                <thead className="sticky top-0 bg-surface-container-low text-on-surface-variant">
+                  <tr>
+                    <th className="px-3 py-1.5 font-bold">source file</th>
+                    <th className="px-2 py-1.5 font-bold">sheet</th>
+                    <th className="px-2 py-1.5 font-bold">rows</th>
+                    <th className="px-2 py-1.5 font-bold">version</th>
+                    <th className="px-3 py-1.5 font-bold">ingested</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lineage.files.map((f) => (
+                    <tr key={f.id} className="border-t border-outline-variant/60">
+                      <td className="max-w-[220px] truncate px-3 py-1.5 text-on-surface" title={f.file_path}>
+                        {f.file_name}
+                      </td>
+                      <td className="max-w-[180px] truncate px-2 py-1.5 text-on-surface-variant">{f.sheet}</td>
+                      <td className="px-2 py-1.5 text-on-surface">{f.merchants?.toLocaleString()}</td>
+                      <td className="px-2 py-1.5 font-bold text-primary">{f.hash8 || '—'}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-outline">{fmtTime(f.ingested_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

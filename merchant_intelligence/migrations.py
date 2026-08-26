@@ -115,10 +115,47 @@ CREATE TABLE IF NOT EXISTS data_quality_log (
 );
 """
 
-MIGRATIONS: List[Tuple[int, str, str]] = [
+def _v3_source_lineage(conn: sqlite3.Connection) -> None:
+    """v3 — source lineage (roadmap #2, final slice).
+
+    Adds ``merchants.source_file_id`` (logical FK into source_files; SQLite
+    cannot ADD COLUMN with a REFERENCES clause) plus a lookup index, then
+    best-effort backfills existing rows by matching
+    ``merchants.sheet_name`` ("<file stem> :: <sheet>") against the
+    registered source_files rows. Runs as a callable because ALTER TABLE
+    cannot be made idempotent in plain SQL.
+    """
+    has_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='merchants'"
+    ).fetchone()
+    if not has_table:
+        return  # fresh/empty DB — the build will stamp rows directly
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(merchants)")}
+    if "source_file_id" not in cols:
+        conn.execute("ALTER TABLE merchants ADD COLUMN source_file_id INTEGER")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_merchants_source_file "
+                 "ON merchants(source_file_id)")
+    # Backfill: sheet_name embeds the file STEM, not the full path.
+    rows = conn.execute(
+        "SELECT id, file_path, sheet_name FROM source_files").fetchall()
+    for sf_id, file_path, sheet in rows:
+        stem = Path(file_path).stem
+        conn.execute(
+            "UPDATE merchants SET source_file_id = ? "
+            "WHERE sheet_name = ? AND source_file_id IS NULL",
+            (sf_id, f"{stem} :: {sheet}"))
+
+
+# A migration payload is either a SQL script (str, executed with
+# executescript — every statement must be idempotent) or a callable
+# receiving the open connection (for DDL that plain SQL cannot make
+# idempotent, e.g. ALTER TABLE ADD COLUMN).
+MIGRATIONS: List[Tuple[int, str, Any]] = [
     (1, "baseline (build-script schema is governed)", _MIGRATION_V1_BASELINE),
     (2, "data platform tables: source_files, identifiers, "
         "entity_clusters, data_quality_log", _MIGRATION_V2_DATA_PLATFORM),
+    (3, "source lineage: merchants.source_file_id + index + backfill",
+        _v3_source_lineage),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
@@ -167,7 +204,10 @@ def apply_migrations(db_path: Path,
             # partially-applied migration retries harmlessly, and the version
             # stamp is written only after the whole script succeeded.
             try:
-                conn.executescript(sql)
+                if callable(sql):
+                    sql(conn)
+                else:
+                    conn.executescript(sql)
                 conn.execute(f"PRAGMA user_version = {int(version)}")
                 conn.commit()
             except Exception:

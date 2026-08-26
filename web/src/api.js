@@ -232,6 +232,11 @@ export const api = {
     return res.json()
   },
   ingestWatchTrigger: () => post('/ingest/watch/trigger', {}),
+  lineage: async () => {
+    const res = await fetch(`${BASE}/lineage`)
+    if (!res.ok) throw new Error('Failed to load source lineage')
+    return res.json()
+  },
   applySuggestion: (ngram, intent, weight) =>
     post('/feedback/suggestions/apply', { ngram, intent, weight }),
   rejectSuggestion: (ngram, intent) =>

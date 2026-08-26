@@ -89,6 +89,8 @@ DELIBERATE_ADDITIONS = {
     "/api/copilot",
     "/api/ingest/watch",
     "/api/ingest/watch/trigger",
+    "/api/lineage",
+    "/api/lineage/merchant/{merchant_id}",
     "/api/assets/history",
     "/api/assets/pending",
     "/api/assets/{asset_type}/{asset_id}/apply",

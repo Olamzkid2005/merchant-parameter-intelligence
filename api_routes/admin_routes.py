@@ -623,3 +623,22 @@ def ingest_watch_trigger():
     from merchant_intelligence.watcher import get_watcher
     _audit("ingest_watch_trigger")
     return get_watcher().trigger("api")
+
+
+# ── Source lineage (roadmap #2, final slice) ─────────────────────────
+
+@router.get("/lineage")
+def lineage_files():
+    """Per-source-file lineage: every ingested workbook/sheet, its content
+    hash, when it was ingested, and how many merchant rows it produced."""
+    from merchant_intelligence import lineage
+    return lineage.file_summary()
+
+
+@router.get("/lineage/merchant/{merchant_id}")
+def lineage_for_merchant(merchant_id: int):
+    """Full lineage for one merchant row: the exact workbook, sheet,
+    physical spreadsheet row, and file version (content hash) it came from."""
+    from merchant_intelligence import lineage
+    _audit("lineage", json.dumps({"merchant_row": merchant_id}))
+    return lineage.merchant_trace(merchant_id)

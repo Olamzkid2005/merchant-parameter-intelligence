@@ -133,6 +133,45 @@ def find_excel_files(folder: Path) -> List[Path]:
     return sorted({p.resolve() for p in files})
 
 
+def _sha256_file(path: Path) -> str:
+    """Content hash of a workbook — the lineage record's version stamp."""
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _register_source_file(conn: sqlite3.Connection, file_path: Path,
+                          file_hash: str, sheet_name: str, row_count: int,
+                          column_names: List[str]) -> Optional[int]:
+    """Register one ingested file::sheet in source_files (lineage).
+
+    Upsert on (file_path, sheet_name); returns the lineage id used to stamp
+    merchants.source_file_id. Table exists because migrations run at build
+    start; a missing table raises to the caller (which skips lineage)."""
+    import json as _json
+    now = datetime.now().isoformat(timespec="seconds")
+    row = conn.execute(
+        "SELECT id FROM source_files WHERE file_path = ? AND sheet_name = ?",
+        (str(file_path), sheet_name)).fetchone()
+    if row:
+        conn.execute(
+            "UPDATE source_files SET file_hash = ?, row_count = ?, "
+            "column_names = ?, ingested_at = ?, status = 'ok', "
+            "error_message = '' WHERE id = ?",
+            (file_hash, row_count, _json.dumps(column_names), now, row[0]))
+        return int(row[0])
+    cur = conn.execute(
+        "INSERT INTO source_files (file_path, file_hash, sheet_name, "
+        "row_count, column_names, ingested_at, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'ok')",
+        (str(file_path), file_hash, sheet_name, row_count,
+         _json.dumps(column_names), now))
+    return int(cur.lastrowid)
+
+
 def folder_snapshot(folder: Path) -> Dict[Path, Tuple[int, int]]:
     """Snapshot every Excel file's (mtime_ns, size) so changes can be detected."""
     snap: Dict[Path, Tuple[int, int]] = {}
@@ -479,6 +518,21 @@ def build_intelligence_db(folder: Path, out_path: Path) -> bool:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(DB_SCHEMA_SQL)
     conn.commit()
+    # Source lineage (roadmap #2): bring the fresh DB up to the latest
+    # schema version BEFORE ingestion so the lineage tables/columns exist
+    # (source_files + merchants.source_file_id). Idempotent; the pipeline's
+    # final migration step re-runs harmlessly.
+    try:
+        from merchant_intelligence.migrations import apply_migrations
+        mig = apply_migrations(out_path)
+        if mig.get("ok"):
+            logger.info(f"  ✅ Schema migrations applied "
+                        f"(v{mig.get('to_version')})")
+        else:
+            logger.warning(f"  [..] schema migrations skipped: "
+                           f"{mig.get('error') or mig.get('skipped_reason')}")
+    except Exception as _mig_exc:  # noqa: BLE001 — lineage is additive
+        logger.warning(f"  [..] schema migrations unavailable: {_mig_exc}")
     logger.info(f"  ✅ Created fresh {out_path.name} schema\n")
 
     c = conn.cursor()
@@ -504,6 +558,12 @@ def build_intelligence_db(folder: Path, out_path: Path) -> bool:
         reference_headers = _workbook_reference_headers(xls)
 
         file_rows = 0
+        # Content hash computed once per workbook — the lineage record's
+        # version stamp (source_files.file_hash).
+        try:
+            file_hash = _sha256_file(file_path)
+        except OSError:
+            file_hash = ""
         for sheet_name in xls.sheet_names:
             try:
                 df, header_offset = read_sheet_detected(
@@ -661,6 +721,22 @@ def build_intelligence_db(folder: Path, out_path: Path) -> bool:
 
             if sheet_rows:
                 logger.info(f"    [{file_path.name}] Sheet: {sheet_name:<28} → {sheet_rows:>4} rows")
+                # Source lineage (roadmap #2): register this file::sheet in
+                # source_files and stamp the rows just ingested with the
+                # lineage id. Never fails the build — lineage is additive.
+                try:
+                    sf_id = _register_source_file(
+                        conn, file_path, file_hash, sheet_name,
+                        sheet_rows, [str(c) for c in df.columns])
+                    if sf_id:
+                        conn.execute(
+                            "UPDATE merchants SET source_file_id = ? "
+                            "WHERE sheet_name = ? AND source_file_id IS NULL",
+                            (sf_id, f"{file_path.stem} :: {sheet_name}"))
+                        conn.commit()
+                except Exception as lin_exc:  # noqa: BLE001
+                    logger.warning(f"    [..] lineage registration skipped "
+                                   f"for {sheet_name}: {lin_exc}")
             file_rows += sheet_rows
 
         if file_rows:
