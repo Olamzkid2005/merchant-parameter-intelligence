@@ -7,7 +7,7 @@ static_accounts_for_acc / static_accounts_for_mx, plus the pasted-name vs
 registry-name status helper (_name_status / _name_for).
 """
 import sqlite3
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from .. import config
 from ..fuzzy import confusable_key, confusable_variants, token_sort_ratio
@@ -201,6 +201,113 @@ def static_rows_for_tid(conn, tids: List[str]) -> Dict[str, Dict[str, Any]]:
         if key and key not in out:
             out[key] = r
     return out
+
+
+# ── Cross-identifier family fallback ─────────────────────────────────────
+
+# Fields eligible for the cross-identifier fallback: merchant-level contact
+# attributes that are valid on ANY sibling row of the same merchant.
+# Deliberately excludes financial fields (static account, payable, alias,
+# account_number) — those are terminal-specific and must never be pulled
+# from a sibling terminal's row.
+CONTACT_FIELDS = ("email", "phone", "contact_name")
+
+
+def family_rows_for(conn, row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Sibling registry rows for the same merchant as `row`.
+
+    Two rows belong to the same merchant family when they share an exact
+    merchant_name, merchant_id, TID or MX code — the same merchant is
+    routinely keyed by a different identifier in each source (BIDWILL
+    MX183515 on the static-account sheet, MX184740 on the NNPC sheet, both
+    TID 2103O084). Used to harvest contact fields (email/phone) that live
+    on a sibling row when the resolved row's own sheet has none.
+
+    GUARD: an identifier link is only followed when it is unambiguous. A
+    key shared with ANY other distinct merchant name (one MX registered to
+    two merchants — MX184740 maps to BIDWILL *and* Banigo E.) links only
+    rows whose names are token-compatible (>= 0.80), so a field never
+    leaks across unrelated merchants through a shared identifier.
+    """
+    rname = _norm(row.get("merchant_name"))
+    keys = {k: _norm(row.get(k)) for k in ("merchant_id", "tid", "mxcode")}
+    keys = {k: v for k, v in keys.items() if v}
+    if not rname and not keys:
+        return []
+    cols = ("id, merchant_name, tid, mxcode, phone, email, contact_name, "
+            "sheet_name")
+    sibs: List[Dict[str, Any]] = []
+    seen: set = set()
+
+    def _add(rows):
+        for s in rows:
+            if row.get("id") is not None and s.get("id") == row.get("id"):
+                continue
+            if s.get("id") in seen:
+                continue
+            seen.add(s.get("id"))
+            sibs.append(s)
+
+    if rname:
+        _add(_fetch(
+            conn,
+            f"SELECT {cols} FROM merchants "
+            f"WHERE UPPER(TRIM(merchant_name)) = ?",
+            [rname],
+        ))
+    for k, kv in keys.items():
+        krows = _fetch(
+            conn,
+            f"SELECT {cols} FROM merchants WHERE UPPER(TRIM({k})) = ?",
+            [kv],
+        )
+        names = {_norm(r.get("merchant_name")) for r in krows}
+        names.discard("")
+        others = {n for n in names if n != rname}
+        if rname and others:
+            # Key shared with at least one other distinct name — keep only
+            # the rows whose name is this merchant's own name or a close
+            # variant (branch spellings like the '- NNPC' suffix), never a
+            # different merchant. This fires even when exactly TWO merchants
+            # share the key (the real BIDWILL/Banigo case): one foreign
+            # name is already enough to make the link ambiguous.
+            krows = [
+                r for r in krows
+                if _norm(r.get("merchant_name")) == rname
+                or token_sort_ratio(rname, _norm(r.get("merchant_name")))
+                >= 0.8
+            ]
+        elif not rname and len(names) > 1:
+            # Nameless row (some registry sheets carry identifiers only):
+            # the link is only trustworthy when every named row under this
+            # key belongs to ONE merchant. Two distinct names on one key
+            # means we cannot tell which merchant the nameless row is —
+            # harvest nothing (conservative).
+            krows = []
+        _add(krows)
+    return sibs
+
+
+def cross_identifier_field(conn, row: Dict[str, Any], field: str) -> Tuple[str, List[Dict[str, Any]]]:
+    """Harvest `field` from family rows when `row` itself has none.
+
+    Contact fields (email/phone/contact_name) belong to the MERCHANT, not
+    the individual terminal row, so a missing value on the resolved row's
+    sheet can legitimately come from a sibling source row. Multiple values
+    are joined with '; ' (the multi-contact display rule — several emails
+    in one cell). Returns ("", []) when the row already has the field or
+    no sibling carries one, so callers fall through unchanged.
+    """
+    if str(row.get(field) or "").strip():
+        return "", []
+    vals: List[str] = []
+    sources: List[Dict[str, Any]] = []
+    for s in family_rows_for(conn, row):
+        v = str(s.get(field) or "").strip()
+        if v and v.upper() not in [x.upper() for x in vals]:
+            vals.append(v)
+            sources.append(s)
+    return ("; ".join(vals) if vals else ""), sources
 
 
 def _name_status(user_name: str, registry_name: str) -> str:

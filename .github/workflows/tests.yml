@@ -58,6 +58,7 @@ jobs:
             test_ingest_ledger.py \
             test_migrations.py \
             test_lineage.py \
+            test_contact_fallback.py \
             test_api_split.py \
             test_engine_upgrades.py \
             test_engine_v2.py \

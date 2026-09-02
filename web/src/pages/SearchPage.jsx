@@ -536,6 +536,7 @@ const TASK_COLUMN_KEYS = {
   'Account Number': 'account_number',
   Contact: 'contact',
   Address: 'address',
+  Via: 'via',                               // cross-identifier fallback provenance
   Onboarded: 'onboarded',                  // segment rows; field pipeline uses header text
   Found: 'found',                          // verify pipeline (Yes/No)
   Row: 'row',
@@ -631,12 +632,13 @@ const TASK_MONO_KEYS = new Set([
 const TASK_WIDE_COLS = new Set([
   'address', 'sources', 'merchant', 'email', 'account_name', 'slip_header',
   'beneficiary', 'bank', 'state', 'current_bank', 'old address',
-  'new address', 'old account name', 'new account name', 'contact',
+  'new address', 'old account name', 'new account name', 'contact', 'via',
 ])
 
 
 const STATUS_TONE = {
   found: 'border-green-200 bg-green-100 text-green-900',
+  found_via_family: 'border-sky-200 bg-sky-50 text-sky-900',
   name_mismatch: 'border-red-200 bg-red-50 text-red-900',
   no_static_account: 'border-orange-200 bg-orange-50 text-orange-900',
   no_name: 'border-slate-200 bg-slate-50 text-slate-700',
@@ -644,6 +646,7 @@ const STATUS_TONE = {
 }
 const STATUS_LABEL = {
   found: 'Found',
+  found_via_family: 'Via family row',
   name_mismatch: 'Name mismatch',
   no_static_account: 'No static acct',
   no_name: 'Found',

@@ -11,9 +11,9 @@ import re
 from typing import Any, Dict, List, Tuple
 
 from .db import (
-    RESOLVE_COLS, _fetch, _name_for, _name_status, _norm, resolve_any,
-    resolve_mx, static_accounts_for_acc, static_accounts_for_mx,
-    static_rows_for_tid,
+    CONTACT_FIELDS, RESOLVE_COLS, _fetch, _name_for, _name_status, _norm,
+    cross_identifier_field, resolve_any, resolve_mx, static_accounts_for_acc,
+    static_accounts_for_mx, static_rows_for_tid,
 )
 from .parser import key_merchant_matches, looks_like_address
 from .vocab import (
@@ -408,6 +408,19 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
             r = dict(r)
             r[field] = qr[field]
         status = _name_status(_name_for(named, v), r.get("merchant_name") or "")
+        # Cross-identifier fallback (contact fields only): the merchant's
+        # email/phone often lives on a sibling source row keyed by a
+        # different identifier (BIDWILL MX183515's email sits on the NNPC
+        # sheet under MX184740). Harvest from family rows when this row's
+        # own sheet has none — never for financial fields, which are
+        # terminal-specific.
+        fallback, fb_sources = "", []
+        if field in CONTACT_FIELDS:
+            fallback, fb_sources = cross_identifier_field(conn, r, field)
+        if fallback:
+            r = dict(r)
+            r[field] = fallback
+            status = "found_via_family"
         rows.append({
             "identifier": v,
             "merchant": r.get("merchant_name") or "",
@@ -416,6 +429,10 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
             "mxcode": r.get("mxcode") or "",
             "sheet": r.get("sheet_name") or "",
             "status": status,
+            **({"via": "; ".join(
+                f"{s.get('sheet_name') or 'registry'} "
+                f"(TID {s.get('tid') or '—'})" for s in fb_sources)}
+               if fb_sources else {}),
         })
     # Name-only requests ("get the email for THE FILM HOUSE"): resolve the
     # name through the search engine and pull the field per best row. When
@@ -485,6 +502,16 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
                 status = "found"
             else:
                 status = _name_status(n, rec.get("merchant_name") or "")
+            # Contact-field family fallback for name-resolved rows too —
+            # same rule as the identifier branch above (the merchant's
+            # email may live on a sibling row in another source sheet).
+            fb, fb_sources = "", []
+            if field in CONTACT_FIELDS:
+                fb, fb_sources = cross_identifier_field(conn, rec, field)
+            if fb:
+                rec = dict(rec)
+                rec[field] = fb
+                status = "found_via_family"
             rows.append({
                 "identifier": n,
                 "merchant": rec.get("merchant_name") or "",
@@ -497,6 +524,10 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
                 # verify WHY this TID was chosen (the pasted line is already
                 # in `identifier`).
                 **({"address": rec.get("address") or ""} if by_address else {}),
+                **({"via": "; ".join(
+                    f"{s.get('sheet_name') or 'registry'} "
+                    f"(TID {s.get('tid') or '—'})" for s in fb_sources)}
+                   if fb_sources else {}),
             })
     src = f"{len(values)} identifier(s)" if values \
         else f"{len(task.get('names') or [])} name(s)"
@@ -504,7 +535,13 @@ def _pipeline_field(conn, task, field: str, label: str, intent: str):
     base_cols = ["Identifier", "Merchant", label, "TID", "MX Code"]
     if by_address:
         base_cols.append("Matched Address")
-    for c in base_cols + ["Source", "Status"]:
+    tail_cols = ["Source", "Status"]
+    # The family-fallback provenance column only appears when at least one
+    # row was actually harvested from a sibling row — ordinary results keep
+    # the standard column set.
+    if any(r.get("via") for r in rows):
+        tail_cols.insert(0, "Via")
+    for c in base_cols + tail_cols:
         if c not in cols:
             cols.append(c)
     return {
