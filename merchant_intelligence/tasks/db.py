@@ -310,6 +310,42 @@ def cross_identifier_field(conn, row: Dict[str, Any], field: str) -> Tuple[str, 
     return ("; ".join(vals) if vals else ""), sources
 
 
+def cross_identifier_contacts(conn, row: Dict[str, Any]) -> Tuple[Dict[str, str], List[Dict[str, Any]]]:
+    """Harvest ALL missing contact fields in one family query.
+
+    Profile rows carry up to three contact fields (email, phone,
+    contact_name); calling cross_identifier_field per field would traverse
+    the family rows three times. This fills every missing CONTACT_FIELDS
+    member from the sibling rows in a single family_rows_for pass and
+    returns ({field: joined_value}, [contributing sibling rows]) — fields
+    the row already has are never touched, and fields no sibling supplies
+    are absent from the dict.
+    """
+    missing = [f for f in CONTACT_FIELDS
+               if not str(row.get(f) or "").strip()]
+    if not missing:
+        return {}, []
+    sibs = family_rows_for(conn, row)
+    if not sibs:
+        return {}, []
+    filled: Dict[str, str] = {}
+    for f in missing:
+        vals: List[str] = []
+        for s in sibs:
+            v = str(s.get(f) or "").strip()
+            if v and v.upper() not in [x.upper() for x in vals]:
+                vals.append(v)
+        if vals:
+            filled[f] = "; ".join(vals)
+    if not filled:
+        return {}, []
+    # Provenance: siblings that supplied at least one harvested value.
+    sources = [s for s in sibs
+               if any(f in filled and str(s.get(f) or "").strip()
+                      for f in CONTACT_FIELDS)]
+    return filled, sources
+
+
 def _name_status(user_name: str, registry_name: str) -> str:
     """Compare the user-provided pasted name with the registry name.
 

@@ -12,8 +12,9 @@ from typing import Any, Dict, List, Tuple
 
 from .db import (
     CONTACT_FIELDS, RESOLVE_COLS, _fetch, _name_for, _name_status, _norm,
-    cross_identifier_field, resolve_any, resolve_mx, static_accounts_for_acc,
-    static_accounts_for_mx, static_rows_for_tid,
+    cross_identifier_contacts, cross_identifier_field, resolve_any,
+    resolve_mx, static_accounts_for_acc, static_accounts_for_mx,
+    static_rows_for_tid,
 )
 from .parser import key_merchant_matches, looks_like_address
 from .vocab import (
@@ -610,34 +611,62 @@ def _pipeline_source(conn, task):
     return _pipeline_field(conn, task, "sheet_name", "Source", "source")
 
 
+def _profile_row(rec: Dict[str, Any], identifier: str, status: str,
+                 via: str = "") -> Dict[str, Any]:
+    """Build one profile result row from a registry record."""
+    out = {
+        "identifier": identifier,
+        "merchant": rec.get("merchant_name") or "",
+        "tid": rec.get("tid") or "",
+        "mxcode": rec.get("mxcode") or "",
+        "phone": rec.get("phone") or "",
+        "email": rec.get("email") or "",
+        "contact": rec.get("contact_name") or "",
+        "address": rec.get("address") or "",
+        "account_name": rec.get("account_name") or "",
+        "account_number": rec.get("account_number") or "",
+        "bank": rec.get("state") or "",
+        "sheet": rec.get("sheet_name") or "",
+        "status": status,
+    }
+    if via:
+        out["via"] = via
+    return out
+
+
 def _pipeline_profile(conn, task: Dict[str, Any]) -> Dict[str, Any]:
-    """Identifiers -> full registry row (merchant, contacts, accounts, source)."""
+    """Identifiers -> full registry row (merchant, contacts, accounts, source).
+
+    Contact fields (email/phone/contact) use the cross-identifier family
+    fallback: when the resolved row's own sheet lacks them, they are
+    harvested from sibling rows of the same merchant in other sources
+    (guarded against shared-identifier leakage) — same rule as the field
+    pipelines.
+    """
     idents = task["identifiers"]
     values = [v for k in ID_KINDS for v in idents.get(k, [])]
     resolved = resolve_any(conn, values)
     named = task.get("named", [])
     rows, not_found = [], []
+    any_via = False
     for v in values:
         r = resolved.get(v.upper().strip())
         if not r:
             not_found.append({"id": v, "kind": "any", "reason": "not in registry"})
             continue
         status = _name_status(_name_for(named, v), r.get("merchant_name") or "")
-        rows.append({
-            "identifier": v,
-            "merchant": r.get("merchant_name") or "",
-            "tid": r.get("tid") or "",
-            "mxcode": r.get("mxcode") or "",
-            "phone": r.get("phone") or "",
-            "email": r.get("email") or "",
-            "contact": r.get("contact_name") or "",
-            "address": r.get("address") or "",
-            "account_name": r.get("account_name") or "",
-            "account_number": r.get("account_number") or "",
-            "bank": r.get("state") or "",
-            "sheet": r.get("sheet_name") or "",
-            "status": status,
-        })
+        filled, fb_sources = cross_identifier_contacts(conn, r)
+        via = ""
+        if filled:
+            r = dict(r)
+            r.update(filled)
+            status = "found_via_family"
+            via = "; ".join(
+                f"{s.get('sheet_name') or 'registry'} "
+                f"(TID {s.get('tid') or '—'})" for s in fb_sources)
+            any_via = True
+        row = _profile_row(r, v, status, via)
+        rows.append(row)
     # Name-only requests: "get me all the information on medplus" — resolve
     # the name to its best rows and return them as full profiles.
     for n in task.get("names") or []:
@@ -647,30 +676,29 @@ def _pipeline_profile(conn, task: Dict[str, Any]) -> Dict[str, Any]:
             continue
         for rec in name_rows:
             status = _name_status(n, rec.get("merchant_name") or "")
-            rows.append({
-                "identifier": n,
-                "merchant": rec.get("merchant_name") or "",
-                "tid": rec.get("tid") or "",
-                "mxcode": rec.get("mxcode") or "",
-                "phone": rec.get("phone") or "",
-                "email": rec.get("email") or "",
-                "contact": rec.get("contact_name") or "",
-                "address": rec.get("address") or "",
-                "account_name": rec.get("account_name") or "",
-                "account_number": rec.get("account_number") or "",
-                "bank": rec.get("state") or "",
-                "sheet": rec.get("sheet_name") or "",
-                "status": status,
-            })
+            filled, fb_sources = cross_identifier_contacts(conn, rec)
+            via = ""
+            if filled:
+                rec = dict(rec)
+                rec.update(filled)
+                status = "found_via_family"
+                via = "; ".join(
+                    f"{s.get('sheet_name') or 'registry'} "
+                    f"(TID {s.get('tid') or '—'})" for s in fb_sources)
+                any_via = True
+            rows.append(_profile_row(rec, n, status, via))
     src = f"{len(values)} identifier(s)" if values \
         else f"{len(task.get('names') or [])} name(s)"
+    cols = ["Identifier", "Merchant", "TID", "MX Code", "Phone", "Email",
+            "Contact", "Address", "Account Name", "Account Number",
+            "State", "Source", "Status"]
+    if any_via:
+        cols.insert(cols.index("Source"), "Via")
     return {
         "intent": "profile",
         "pipeline": ["resolve_full"],
         "summary": f"Full profiles for {len(rows)}/{src}.",
-        "columns": ["Identifier", "Merchant", "TID", "MX Code", "Phone", "Email",
-                    "Contact", "Address", "Account Name", "Account Number",
-                    "State", "Source", "Status"],
+        "columns": cols,
         "rows": rows,
         "not_found": not_found,
     }

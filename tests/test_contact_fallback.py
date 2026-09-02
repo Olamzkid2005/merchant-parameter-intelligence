@@ -20,9 +20,11 @@ import sqlite3
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from merchant_intelligence.tasks.db import (  # noqa: E402
-    cross_identifier_field, family_rows_for,
+    cross_identifier_contacts, cross_identifier_field, family_rows_for,
 )
-from merchant_intelligence.tasks.pipelines import _pipeline_field  # noqa: E402
+from merchant_intelligence.tasks.pipelines import (  # noqa: E402
+    _pipeline_field, _pipeline_profile,
+)
 
 _PASSED = _FAILED = 0
 
@@ -71,11 +73,14 @@ FAMILY = [
     (8, "BETA MERCHANT",   "T888", "MX9", "",            "Sheet B"),
 ]
 for rid, name, tid, mx, email, sheet in FAMILY:
+    # Static-account rows carry no contact columns at all (the real
+    # BIDWILL situation); only the NNPC rows carry phone.
+    phone = "08000000000" if rid in (3, 4) else ""
     conn.execute(
         "INSERT INTO merchants (id, sheet_name, row_number, merchant_name,"
         " mxcode, tid, email, phone, static_acc_no)"
         " VALUES (?,?,?,?,?,?,?,?,'')",
-        (rid, sheet, rid + 1, name, mx, tid, email, "08000000000"))
+        (rid, sheet, rid + 1, name, mx, tid, email, phone))
 conn.commit()
 
 bidwill_sa = dict(conn.execute(
@@ -157,6 +162,38 @@ check("direct-hit rows keep the plain column set and direct status",
       "Via" not in res2["columns"]
       and all(r["status"] in ("found", "no_name") for r in res2["rows"]),
       (res2["columns"], [(r["status"]) for r in res2["rows"]]))
+
+# ── 6. Profile pipeline fallback ─────────────────────────────────────────
+print("\n[6] _pipeline_profile fills all missing contacts in one family pass")
+val_p, srcs_p = cross_identifier_contacts(conn, bidwill_sa)
+check("multi-field harvest fills email+phone together",
+      val_p.get("email") == "willy@yahoo.com"
+      and val_p.get("phone") == "08000000000"
+      and "contact_name" not in val_p,
+      val_p)
+check("no-missing row returns empty",
+      cross_identifier_contacts(conn, bidwill_nnpc) == ({}, []))
+
+ptask = {"identifiers": {"mxcode": ["MX1"]}, "names": [], "named": []}
+pres = _pipeline_profile(conn, ptask)
+prow = pres["rows"][0]
+check("profile row status found_via_family",
+      prow["status"] == "found_via_family", prow["status"])
+check("profile email+phone harvested",
+      prow["email"] == "willy@yahoo.com"
+      and prow["phone"] == "08000000000", prow)
+check("Via column present in profile output",
+      "Via" in pres["columns"], pres["columns"])
+check("financial fields NOT harvested (stay blank)",
+      prow["account_number"] == "" and prow["address"] == "", prow)
+
+ptask2 = {"identifiers": {"mxcode": ["MX2"]}, "names": [], "named": []}
+pres2 = _pipeline_profile(conn, ptask2)
+check("profile with own contacts keeps plain columns + status",
+      "Via" not in pres2["columns"]
+      and pres2["rows"][0]["status"] in ("found", "no_name")
+      and pres2["rows"][0]["email"] == "willy@yahoo.com",
+      (pres2["columns"], pres2["rows"][0]["status"]))
 
 conn.close()
 os.unlink(tmp.name)
